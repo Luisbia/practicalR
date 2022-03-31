@@ -1,0 +1,450 @@
+---
+title: "Loading files in R"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  fig.height = 9,
+  fig.width = 12
+)
+```
+
+## Introduction 
+
+I provide some examples, and some reflections, of how to import the most common types of files we use in National Accounts into R. We will go through the  most basic operation (e.g:import a single file) to handling multiple files
+
+## SDMX files
+
+To load SDMX files into R we will need to install the package `{readsdmx}`
+
+```{r}
+library(readsdmx)
+```
+
+The package has only a function `read_sdmx`.
+
+```{r}
+df <- readsdmx::read_sdmx("data/NAREG_T1002_A_AT_2019_0000_V0001.xml")
+
+str(df)
+```
+
+As simple as that. Please note that `read_sdmx` will consider all columns as characters even if they are clearly numeric like OBS_VALUE.
+
+```{r}
+mean(df$OBS_VALUE)
+```
+
+You will have to convert the columns to the type you want (numeric, date, factor) after importing it .
+
+```{r}
+df$OBS_VALUE <- as.numeric(df$OBS_VALUE)
+mean(df$OBS_VALUE)
+```
+
+An advantage is that when importing multiple sdmx files it will be easy to consolidate all the files in a single dataframe.
+
+```{r,eval=TRUE}
+library(tidyverse)
+
+df <- list.files(
+  path = "data/",
+  pattern = glob2rx("*.xml"),
+  full.names = TRUE
+)
+
+df2 <- purrr::map_dfr(df, readsdmx::read_sdmx)
+
+unique(df2$TABLE_IDENTIFIER)
+```
+
+A disadvantage is that we cannot read directly zipped files. We would need first to unzip them. An elegant way to do it is create a temporary folder, unzip the file, read it and delete the folder.
+
+
+```{r}
+td <- tempdir()
+
+unzip("data/NAREG_T1002_A_AT_2019_0000_V0001.zip", exdir = td)
+df <- readsdmx::read_sdmx(list.files(
+  path = td,
+  pattern = ".xml$",
+  full.names = TRUE
+))
+unlink(td)
+```
+
+Or directly 
+
+```{r}
+temp <- unzip("data/NAREG_T1002_A_AT_2019_0000_V0001.zip")
+df <- readsdmx::read_sdmx(temp)
+unlink(temp)
+```
+
+
+## CSV files created from converting SDMX files
+
+Fame converts sdmx files to csv files during the loading process and they are stored in the folder */INSPACE/*. We can read csv files with the base R function `read.csv2` without the need of loading a library.
+
+```{r}
+system.time(df <- read.csv2("data/NAREG_T1200_A_AT_2019_0000_V0001.xml.csv"))
+```
+
+
+or (fastest) with `fread` from `{data.table}`
+
+```{r}
+system.time(df <- data.table::fread("data/NAREG_T1200_A_AT_2019_0000_V0001.xml.csv"))
+```
+
+or more convenient if we need specific parameters let `{rio}` to decide.
+
+```{r}
+system.time(df <- rio::import("data/NAREG_T1200_A_AT_2019_0000_V0001.xml.csv"))
+```
+
+
+All these readers will try to guess the type of columns. 
+
+```{r}
+str(df)
+```
+
+which sometimes maybe problematic if different column types are identified for different files. As a consequence we will not be able to find the data frames because the column types will not be homogeneous.
+
+To be sure that this problem does not happen, the best approach is to use a function that will be applied to each dataset. We can also use the function to select only the columns in which we are interested.
+
+```{r}
+custom_function <- function(x) {
+  rio::import(x) %>%
+    select(REF_AREA, STO, ACTIVITY, UNIT_MEASURE, TIME_PERIOD, OBS_VALUE) %>%
+    mutate(
+      TIME_PERIOD = as.integer(TIME_PERIOD),
+      OBS_VALUE = as.numeric(OBS_VALUE),
+      REF_AREA = as.factor(REF_AREA),
+      STO = as.factor(STO),
+      ACTIVITY = as.factor(ACTIVITY),
+      UNIT_MEASURE = as.factor(UNIT_MEASURE)
+    )
+}
+```
+ 
+and apply it to all the files.
+
+```{r}
+df <- list.files(
+  path = "data/",
+  pattern = glob2rx("*.xml.csv$"),
+  full.names = TRUE
+)
+
+df2 <- purrr::map_dfr(df, custom_function)
+```
+ 
+If we use `{rio}` we can load directly zipped files.
+ 
+```{r}
+df <- rio::import("data/NAREG_T1002_A_AT_2019_0000_V0001.xml.csv.zip")
+```
+ 
+## Matis extractions
+
+Loading the Matis extraction files  is straightforward. We will rely again on `{rio}`
+
+```{r}
+df <- rio::import("data/t1002_AT_01.xlsx")
+str(df)
+```
+
+There are a few issues with this file:
+
+ - The first column contains all the variables.
+ - The years are in columns.
+ - The values for 2020 have been categorized as character.
+ - Flags and numerical values are in the same column.
+
+The best strategy is separate the variables in the first column. The easiest way is using the package `{splitstackshape}`.
+
+```{r}
+library(splitstackshape)
+df <- df %>%
+  cSplit("ANNUAL", sep = ".")
+
+str(df)
+```
+
+Now we know that all the columns that do not contain *ANNUAL* are the values. We can select them excluding the ones that contain ANNUAL with `str_detect` and add them to a column named time with `pivot_longer`.
+
+```{r, error = TRUE}
+df %>%
+  pivot_longer(
+    cols = !starts_with("ANNUAL"),
+    names_to = "time",
+    values_to = "values"
+  )
+```
+
+But we can't because 2020 is different from the others, We need first to convert all of them to a common type.
+
+```{r}
+df <- df %>%
+  mutate(across(!starts_with("ANNUAL"), as.numeric)) %>%
+  pivot_longer(
+    cols = !starts_with("ANNUAL"),
+    names_to = "time",
+    values_to = "values"
+  )
+
+str(df)
+```
+
+We can now convert time to integer and rename the ANNUAL columns or just the ones we want to keep and separate the flags from the values and convert them to numeric to end up with a tidy dataframe to work with.
+
+```{r}
+df <- df %>%
+  separate(values, c("values", "flags"), sep = "#") %>%
+  mutate(
+    values = as.numeric(values),
+    time = as.integer(time)
+  ) %>%
+  select(
+    -ANNUAL_01,
+    -ANNUAL_04,
+    -ANNUAL_06,
+    -ANNUAL_07,
+    -ANNUAL_08,
+    -ANNUAL_09,
+    -ANNUAL_12,
+    -ANNUAL_13,
+    -ANNUAL_14
+  ) %>%
+  rename(
+    type = "ANNUAL_02",
+    table = "ANNUAL_03",
+    geo = "ANNUAL_05",
+    na_item = "ANNUAL_10",
+    nace_r2 = "ANNUAL_11",
+    unit = "ANNUAL_15"
+  )
+str(df)
+```
+
+## Famex extractions
+
+As far as I know (I don't use them) Famex extractions are similar to Matis extractions. The only difference is that the data  does not start in the first row and column. We will use the library `{readxl}`to control the range of what we want to import. We could pass the same parameters to `{rio}` as is the default excel reader. We will need to import the column with the variables, the range with the data and we will write directly the years in the column names.
+
+First the variable names which start in row 6.
+
+```{r}
+library(readxl)
+
+variables <- readxl::read_xlsx("data/famex.xlsx",
+  range = "A6:A3827",
+  col_names = "ANNUAL"
+)
+
+slice_sample(variables, n=5)
+```
+
+And later the data, We already give column names using a sequence of years.
+
+```{r}
+data <- readxl::read_xlsx("data/famex.xlsx",
+  range = "D6:AC3827",
+  col_names = as.character(seq(1995, 2020, by = 1))
+)
+```
+
+We can now bind the columns of the variables and the data.
+
+```{r}
+df <- bind_cols(variables, data)
+```
+
+And do a similar procedure as we saw for matis extractions.
+
+```{r}
+df <- df %>%
+  cSplit("ANNUAL", sep = ".") %>%
+  pivot_longer(
+    cols = !starts_with("ANNUAL"),
+    names_to = "time",
+    values_to = "values"
+  ) %>%
+  separate(values, c("values", "flags"), sep = "#") %>%
+  mutate(
+    values = as.numeric(values),
+    time = as.integer(time)
+  ) %>%
+  select(ANNUAL_06, ANNUAL_12, ANNUAL_13, ANNUAL_16, ANNUAL_18, time, values) %>%
+  rename(
+    geo = "ANNUAL_06",
+    asset10 = "ANNUAL_12",
+    nace_r2 = "ANNUAL_13",
+    unit = "ANNUAL_16",
+    ref_year = "ANNUAL_18"
+  )
+
+slice_sample(df, n=5)
+```
+
+We can see that this type of files are not very convenient because we need to input the range, which means we need to know in advance the content of the file we are going to load.
+
+## Excel files with several worksheets
+
+There are several ways to do this (<https://www.johnmackintosh.net/blog/2021-08-12-well-well-well-my-excel/>) but I'll show the simplest.
+
+```{r}
+df <- rio::import_list("data/several.xlsx", rbind = TRUE)
+```
+
+## Zipped txt files
+
+Another common case we can find is loading the zipped txt files that are sent to eurobase. We will use `{rio}` knowing that if we want to specify the parameters it is using `fread`. We need to skip 3 rows, use white space as separator and tell that the format is txt as the file does not have a filetype extension.
+
+```{r}
+df <- rio::import("data/namq_10_gdp.eurobase_20220103_111501.zip",
+  sep = " ",
+  skip = 3,
+  format = "txt"
+)
+slice_sample(df, n=5)
+```
+
+It is better if we declare the column types and names.
+
+```{r}
+df <- rio::import("data/namq_10_gdp.eurobase_20220103_111501.zip",
+  sep = " ",
+  skip = 3,
+  format = "txt",
+  col.names = c("time", "geo", "na_item", "unit", "s_adj", "values"),
+  colClasses = c(time = "character", geo = "factor", na_item = "factor", unit = "factor", s_adj = "factor", values = "character")
+)
+
+slice_sample(df, n=5)
+```
+
+
+## A practical case of even more untidy Excel files
+
+We could load in a single file all the input used in the so-called expenditure kits. There are two files per quarter from 2015Q1 until 2021Q4 (for the time being). We might be interested in knowing not only the data but if they were reported by countries or imputed by us. We may have impute it because it was missing or done some correction. They are xlsm files.
+
+We create vector with the names of the country sheets. For example HR will not be included at the beginning.
+
+```{r}
+countries <- c("AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FR", "FI", "GR", "HR", "HU", "IE", "IT", "LH", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK")
+```
+
+and get a list of the files (two for this example.
+
+```{r}
+files <- list.files(
+  path = "data/",
+  pattern = "*.xlsm",
+  full.names = TRUE
+) %>%
+  as_tibble()
+
+files
+```
+
+We create custom function that uses `xlsx_cells` from the library `{tidyxl}`. We ignore the cells that are blank and filter only the sheets we are interested in and only the numeric values. We keep as columns only 5 variables: sheet, row, col, numeric and formula. 
+
+```{r}
+read_t102 <- function(x) {
+  tidyxl::xlsx_cells(x, include_blank_cells = FALSE) %>%
+    filter(sheet %in% countries &
+      !is.na(numeric)) %>%
+    select(sheet, row, col, numeric, formula)
+}
+```
+
+We apply the function and create a data.frame.
+
+```{r}
+files_df <- files %>%
+  mutate(data = map(value, ~ read_t102(.x))) %>%
+  unnest(data)
+
+head(files_df)
+```
+
+We have created a file mapping to each cell  where the values should appear (variable, prices, periodicity).
+
+```{r}
+mapping <- rio::import("data/mapping.xlsx")
+
+mapping %>% slice_sample(n = 10)
+```
+
+We can now merge the two. 
+```{r}
+df_a <- left_join(mapping, files_df) %>%
+  select(-row, -col)
+```
+
+and filter the annual data.
+
+```{r}
+df_a <- df_a %>%
+  mutate(dummy = str_sub(time, 5, 5)) %>%
+  filter(dummy == "A") %>%
+  select(-dummy)
+```
+
+We compare the year in the data and the year in which the estimation was done to remove cells that are included in the file (formulas, annotations, etc).
+
+```{r}
+df_a <- df_a %>%
+  mutate(
+    year1 = as.numeric(str_sub(value, -13, -10)),
+    year2 = as.numeric(str_sub(time, 1, 4))
+  ) %>%
+  filter(year2 < year1) %>%
+  select(-year1, -year2)
+```
+
+And we create some variables to know in which quarter the estimation was done and for which version. Both were present in the file names. 
+
+```{r}
+df_a <- df_a %>%
+  rename(geo = sheet, values = numeric) %>%
+  mutate(
+    quarter = str_sub(value, -13, -8),
+    quarter = lubridate::yq(quarter),
+    version = str_sub(value, -6, -6)
+  )
+
+slice_sample(df_a, n=5)
+```
+
+We will do something similar for quarterly data.
+
+```{r}
+df_q <- left_join(mapping, files_df) %>%
+  select(-row, -col) %>%
+  mutate(dummy = str_sub(time, 5, 5)) %>%
+  filter(dummy != "A") %>%
+  select(-dummy) %>%
+  mutate(
+    quarter = str_sub(value, -13, -8),
+    quarter = lubridate::yq(quarter),
+    version = str_sub(value, -6, -6),
+    quarter1 = lubridate::yq(time)
+  ) %>%
+  filter(quarter1 <= quarter) %>%
+  select(-quarter1) %>%
+  rename(geo = sheet, values = numeric)
+
+slice_sample(df_q, n=5)
+```

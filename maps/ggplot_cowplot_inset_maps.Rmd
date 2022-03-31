@@ -1,0 +1,301 @@
+---
+title: "Inset plots with ggplot"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message = FALSE)
+```
+
+An usual problem we find when making regional maps is what to do with the ultra-peripherical regions. I followed the approach suggested by @dhernangomez (<https://dieghernan.github.io/202203_insetmaps/>).
+
+We will use the following libraries. `{gisco}` for getting the NUTS shapes and `{cowplot}`for arranging the different plots.
+
+```{r}
+library(giscoR)
+library(sf)
+library(tidyverse)
+library(cowplot)
+```
+
+We get NUTS 2 shapes with a particular epsg which is commonly used for Europe.
+
+```{r}
+gisco_set_cache_dir("E:/R/packages/giscoR", install = TRUE, overwrite = TRUE)
+
+regions <- gisco_get_nuts(year= "2021",
+                          epsg = "3035", #others ( 4326,3857-Mercator)
+                     nuts_level ="2")
+ggplot(regions)+
+  geom_sf()
+
+```
+
+We set the limits for continental Europe.
+
+```{r}
+ggplot(regions)+
+  geom_sf()+
+  coord_sf(
+    xlim = c(2377294, 6500000),
+    ylim = c(1413597, 5228510)
+  )
+```
+
+We create new individual objects transforming the geometry with particular EPSG.
+```{r}
+canary <- regions %>% 
+  filter(NUTS_ID=="ES70") %>% 
+  st_transform(4083)
+
+guadeloupe <- regions %>% 
+  filter(NUTS_ID=="FRY1") %>% 
+  st_transform(4622)
+
+martinique <- regions %>% 
+  filter(NUTS_ID=="FRY2") %>% 
+  st_transform(4625)
+
+guyanne <- regions %>% 
+  filter(NUTS_ID=="FRY3") %>% 
+  st_transform(4626)
+
+reunion <- regions %>% 
+  filter(NUTS_ID=="FRY4") %>% 
+  st_transform(4626)
+
+mayotte <- regions %>% 
+  filter(NUTS_ID=="FRY5") %>% 
+  st_transform(5793)
+
+malta <- regions %>% 
+  filter(NUTS_ID=="MT00")
+
+azores <- regions %>% 
+  filter(NUTS_ID=="PT20") %>% 
+  st_transform(2188)
+
+madeira <- regions %>% 
+  filter(NUTS_ID=="PT30") %>% 
+  st_transform(4615)
+
+
+main <- regions %>% 
+  filter(!NUTS_ID %in% c("FRY1", "FRY2", "FRY3", "FRY4", "FRY5", "PT30", "ES70", "PT20", "PT30", "MT00"))
+ 
+```
+
+
+We create the main plot.
+
+```{r}
+main_gg <- ggplot(main) +
+  geom_sf() +
+# Center in Europe: EPSG 3035
+  coord_sf(
+    xlim = c(2377294, 6500000),
+    ylim = c(1413597, 5228510)
+  )+
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "grey85", colour = NA),
+    # Add a bit of margin on the upper right
+    # We would place the inset there
+    plot.margin = margin(t = 40, r = 40)
+  )
+main_gg
+
+```
+
+And the insets for each island.
+```{r}
+canary <- ggplot(canary) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Canarias (ES)")
+
+canary
+
+malta <- ggplot(malta) +
+   geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Malta")
+
+malta
+
+guadeloupe <- ggplot(guadeloupe) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Guadeloupe (FR)")
+
+guadeloupe
+
+
+martinique <- ggplot(martinique) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Martinique (FR)")
+
+martinique
+
+guyanne <- ggplot(guyanne) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Guyane (FR)")
+
+guyanne
+
+reunion <- ggplot(reunion) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "La Réunion (FR)")
+
+reunion
+
+mayotte <- ggplot(mayotte) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Mayotte (FR)")
+
+mayotte
+
+azores <- ggplot(azores) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Açores (PT)")
+
+azores
+
+madeira <- ggplot(madeira) +
+  geom_sf() +
+  theme_void() +
+  # Add a border to the inset
+  theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "grey95"),
+    plot.title = element_text(size = 6)
+  )+
+  labs(title = "Madeira (PT")
+
+madeira
+
+```
+
+
+And we put together all of them with `{cowplot}`. There is a need to play with the different parameters to place the islands where we want.
+
+```{r fig.height=9, fig.width=12}
+ggdraw() +
+  draw_plot(main_gg) +
+  draw_plot(canary,
+            height = .1,
+            width = .1,
+            x = 0.32,
+            y = 0.) +
+    draw_plot(malta,
+            height = .1,
+            width = .1,
+            x = 0.82,
+            y = 0.) +
+  draw_plot(guadeloupe,
+            height = .1,
+            width = .1,       
+            x = 0.65,
+            y = 0.85,
+            scale=2)+
+  draw_plot(martinique,
+            height = .1,
+            width = .1,       
+            x = 0.77,
+            y = 0.85,
+            scale=2)+
+  draw_plot(guyanne,
+            height = .1,
+            width = .1,       
+            x = 0.65,
+            y = 0.65,
+            scale=1.7)+
+  draw_plot(reunion,
+            height = .1,
+            width = .1,       
+            x = 0.77,
+            y = 0.65,
+            scale=1.6)+
+  draw_plot(mayotte,
+            height = .1,
+            width = .1,       
+            x = 0.75,
+            y = 0.35,
+            scale=1.5)+
+  draw_plot(azores,
+            height = .1,
+            width = .1,
+            x = 0.12,
+            y = 0.65,
+            scale=1)+
+  draw_plot(madeira,
+            height = .1,
+            width = .1,
+            x = 0.12,
+            y = 0.4,
+            scale=3)
+
+```
+
+
+
+
+
