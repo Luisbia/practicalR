@@ -1,0 +1,121 @@
+---
+title: "Simple outlier detection"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+
+## Introduction
+
+Outlier detection can be done using very sophisticated methods. Here I show some very basic approach for practical detection of outliers/errors.
+
+
+## Data and libraries
+
+```{r}
+library(tidyverse)
+library(dataregacc)
+library(plotly)
+```
+
+As data I will use the hours worked per person. That way we can be more efficient and looked at two variables (hours and persons in one shot).
+
+We remove the extra regio.
+
+```{r}
+df <- regacc %>% 
+  filter(na_item=="EMP" &
+         NUTS =="2" &
+         country!="MK" &
+           !str_ends(geo,"ZZ")&
+           values!=0 &
+           !nace_r2 %in% c("G-J","K-N","O-U","TOTAL") &
+           time>=2000) %>% 
+  select(country,geo,nace_r2,unit,time,values) %>%
+    pivot_wider(names_from = unit,
+              values_from=values) %>% 
+  mutate(HW_PS=round(HW/PS)) %>% 
+  na.omit()
+
+head(df)
+```
+
+
+## Visualisation
+
+
+### Distribution
+
+```{r}
+ggplotly(ggplot(df,aes(HW_PS, colour=nace_r2))+
+  geom_freqpoly(size=1)+
+  theme_light())
+```
+
+We can already see the distribution of hours worked by nace and noticed that the dispersion for A,L and K is somehow different.
+
+Maybe it is due to small values. If we remove rows that involved less than 5 thousand persons.
+
+```{r}
+ ggplotly(ggplot(df %>% filter(PS>=5),aes(HW_PS, colour=nace_r2))+
+  geom_freqpoly(size=1)+
+  theme_light())
+```
+
+### Detailed
+
+But maybe the outliers are due to particular regions. Let's do a more detailed chart.
+
+```{r}
+ggplotly(ggplot(df %>% filter(PS>=5),aes(geo,HW_PS))+
+  geom_point(colour="darkred")+
+  facet_wrap(~nace_r2)+
+  theme_light()+
+    theme(axis.text.x = element_blank()))
+```
+
+This has helped us to identify a few "outliers".
+
+### Data transformation
+ 
+We could transform the data to make other kinds of visualisation.
+
+For time series we could calculate a time mean.
+
+```{r}
+df2<-df %>% 
+  group_by(country,geo,nace_r2) %>% 
+  mutate(time_mean=round(HW_PS*100/mean(HW_PS,na.rm=TRUE)))
+
+head(df2)
+```
+
+#### A line plot
+
+```{r}
+ggplotly(ggplot(df2 ,aes(time,time_mean, group=geo))+
+  geom_line(colour="darkred")+
+  facet_wrap(~nace_r2)+
+  theme_light())
+```
+
+#### A heatmap
+
+Here we will need to restrict a bit, although it is more useful to look at completeness. Let's see only nace L
+```{r}
+ggplotly(ggplot(df2 %>% filter(nace_r2=="L" & time<=2019) ,aes(time,geo, fill=time_mean))+
+  geom_tile()+
+  theme_light()+
+  scale_fill_gradient(low="darkblue", high = "darkred")+
+  scale_x_continuous(expand=c(0,0))+
+  theme(axis.text.y = element_blank(),
+        panel.grid = element_blank()))
+```
+
