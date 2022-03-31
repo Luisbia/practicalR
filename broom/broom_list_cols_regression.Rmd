@@ -1,0 +1,148 @@
+---
+title: "List columns and regressions"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message = FALSE)
+```
+
+## Introduction
+
+We will learn how to use list-columns created with `nest()` (or `split()`), together with `map()` to run many regressions and then gather the results with `broom()`.
+
+## Libraries
+
+We will use the following libraries.
+
+```{r}
+library(tidyverse)
+library(broom)
+library(dataregacc)
+```
+
+
+## Data
+
+We create and tidy the data. We are going to use employees in persons and hours worked by Nace. We will have them in wide format.
+
+```{r}
+data <- regacc %>% 
+  filter(NUTS==2 &
+         na_item=="SAL" &
+         table %in% c("3emp","2emphw") &
+         !country %in% c("AL","MK", "ME", "RS", "TR", "NO") &
+         !str_ends(geo,"ZZ")) %>%
+  select(geo,unit,nace_r2,time, values) %>%
+  na.omit() %>% 
+  pivot_wider(names_from = unit,
+        values_from = values)
+
+head(data)
+```
+
+## group_by() and nest()
+We do a `group_by()` followed by `nest()`.
+
+```{r}
+data_nested <- data %>% 
+  group_by(geo,nace_r2) %>%
+  nest()
+```
+
+We have one row by geo and nace and a tibble attached to each row.
+
+```{r}
+head(data_nested)
+```
+
+Each tibble contains three columns: time, HW and PS
+
+```{r}
+head(data_nested$data,1)
+
+```
+
+## Doing the regressions
+
+We can now run the `r nrow(data_nested)` regressions.
+
+```{r}
+data_nested <- data_nested %>% 
+  mutate(model = map(data, ~ lm(HW ~ PS, data = .x))) 
+
+head(data_nested$model,1)
+```
+
+We have now a new column containing the regression model. We now rely in `broom()` to extract more easily the results.
+
+## Broom::tidy()
+
+With `tidy()` we collect information on the parameters, the standard error or the p-value.
+
+```{r}
+data_nested<- data_nested %>% 
+  mutate(tidy = map(model, tidy))
+
+head(data_nested$tidy,1)
+
+```
+
+## Broom::augment()
+
+With `augment()` we get the fitted results and other information.
+
+```{r}
+data_nested<- data_nested %>% 
+  mutate(augment = map(model, augment))
+
+head(data_nested$augment,1)
+```
+
+## Broom::glance()
+
+With `glance()` we get some summary information like the R^2^, the AIC or the BIC.
+
+```{r}
+data_nested<- data_nested %>% 
+  mutate(glance = map(model, glance))
+
+head(data_nested$glance,1)
+```
+
+We have now all that information together in the dataframe.
+
+```{r}
+glimpse(data_nested)
+```
+
+## Unnest
+
+Now we could unnest but we have to be careful because some columns appear in several tibbles. We can, for example, keep just the R^2^ and plot the mean .
+
+```{r}
+data_unnest<- data_nested %>% 
+  select(-model, -tidy,-augment) %>% 
+  unnest(cols = c(data,glance)) %>% 
+  select(geo,nace_r2,PS,HW,r.squared)
+```
+
+```{r}
+
+mean<- data_unnest %>% 
+  group_by(nace_r2) %>% 
+  summarise(mean=mean(r.squared))
+
+ggplot(mean,aes(mean,fct_reorder(nace_r2,mean)))+
+  geom_col(fill="darkred")+
+  theme_light()+
+  ylab("")+ xlab("")+
+  ggtitle("Average R-square between Persons and Hours Worked by NACE")+
+  scale_x_continuous(expand=c(0,0))
+```
+
