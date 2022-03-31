@@ -1,0 +1,788 @@
+---
+title: "Benchmarking for dummies"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F,fig.width = 9, fig.height = 6)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(tempdisagg)
+library(rio)
+library(ggrepel)
+source("utils.R")
+
+mypal<- c("#CC2299", "#11448B","#EE0000","#FF7700","#668822")
+```
+
+# Introduction
+
+Benchmarking and temporal disaggregation are an important element of the QNA toolkit. There is available relevant documentation in several statistical handbooks, documents and software manuals. Without being exhaustive we could mention: the [Eurostat QNA handbook](https://ec.europa.eu/eurostat/documents/3859598/5936013/KS-GQ-13-004-EN.PDF/3544793c-0bde-4381-a7ad-a5cfe5d8c8d0), and the [IMF QNA Handbook](https://www.imf.org/external/pubs/ft/qna/pdf/2017/chapterv6.pdf) and recent courses organised by C2 on the subject. Having said that, normally the material is only accessible for staff with sound (and recent!) mathematical and statistical background as it involves matrix algebra and statistical notation related to regression analysis. From the point of view of C2 needs, for their own use of these techniques, the material goes sometimes too much in detail on the mathematical/statistical aspects of the techniques but not so much consideration is given to its practical use. The IMF Handbook is the most targeted one but the very simplified examples makes it difficult for newcomers to link the material to their real life needs.
+
+Also relevant for recommended practices are the [ESS Guidelines](https://ec.europa.eu/eurostat/documents/3859598/9441376/KS-06-18-355-EN.pdf/fce32fc9-966f-4c13-9d20-8ce6ccf079b6).
+
+These notes are based in some past QNA trainings, practical experience and some personal thoughts. It tries to cover the basic needs of C2 staff, mainly as a compiler of EU aggregates but also to understand most common countries practices. For explaining Denton's method and Chow-Lin's method I have heavily relied on the material available in Cross[(<https://ec.europa.eu/eurostat/cros/content/main-module-0_en>)].
+
+# Benchmarking
+
+By Benchmarking we understand the procedure to align quarterly data from a higher frequency (normally monthly or quarterly) to data from a lower frequency (normally quarterly or annual). We do not want just to align the two set of values, we also want to preserve as much as possible the evolution of the high frequency series (*movement preservation principle*).
+
+The alignment can be done on the sum (most common case) or the average (employment and population). We can work on level or index series. The high frequency series (or indicator series) will be sometimes a variable which will be closely related to the low frequency series, for example production as a proxy of value added or a subset of the low frequency series (we may only have high frequency series for enterprises above a certain size). We could have one or several indicators but we will focus on the more common case for us of a single indicator.
+
+## Series and BI ratio
+
+We will use some series we are familiar with. The low frequency series will be the EA19 GDP from the year 2000 and the indicator series will be the sum of the quarterly GDP of the four biggest EA economies (DE, FR, IT and ES). This was more or less the situation in the early 2000's when Eurostat started to disseminate a GDP flash estimate.
+
+```{r}
+# Bring the data and tidy
+
+q_gdp<- readRDS("data/q_gdp.rds") %>% 
+  filter(geo %in% c("DE","FR","IT","ES","EA19")) 
+
+a_gdp<- q_gdp%>%
+  filter(geo=="EA19" & time < "2021-01-01") %>% 
+  mutate(time=year(time)) %>% 
+  arrange(time) %>% 
+  group_by(geo,s_adj,unit,time) %>% 
+  mutate(values=sum(values)) %>% 
+    ungroup() %>% 
+  distinct()
+```
+
+Figure 1 shows the so called **benchmark-to-indicator (BI)** ratio, which is the ratio between the annualised high-frequency series (for big EA countries) and the annual series (EA19). We can see that it is around 0.75 and it is important to notice that BI is smooth over time and has a clear pattern, decreasing in the first years, stable in the middle and decreasing again in the last years.
+
+```{r}
+ea4 <- q_gdp %>% 
+  filter(time <="2020-10-01") %>% 
+  mutate(time=year(time)) %>% 
+  arrange(time) %>% 
+  group_by(geo,s_adj,unit,time) %>% 
+  mutate(values=sum(values)) %>% 
+  distinct() %>% 
+  pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= (DE+FR+IT+ES)*100/EA19) %>% 
+  ungroup() %>% 
+  filter(unit =="CP_MEUR" & s_adj=="NSA") %>% 
+select(time,EA4)
+
+ggplot(ea4 ,aes(time,EA4))+
+  geom_line(size=0.8, colour = luis_colors["fucsia"]) +
+  theme_regacc_line+
+  scale_x_continuous(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Benchmark-to-indicator (BI) ratio",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 1")+
+  theme(legend.position = "top")
+```
+
+We know that the indicator is quite representative of our target, and the relationship is not constant but changes smoothly. Another way to see the relationship in economic series is to look at the growth rates of both. Form the BI ratio we know that the EA19 grew more than the 4 biggest EA economies at the beginning and the end of the period we are looking at (2000-2019).
+
+```{r}
+ea4 <- q_gdp %>% 
+    filter(unit =="CP_MEUR" & s_adj=="NSA" &time <="2020-10-01") %>% 
+  select(-unit,-s_adj) %>% 
+  mutate(time=year(time)) %>% 
+  arrange(time) %>% 
+  group_by(geo,time) %>% 
+  mutate(values=sum(values)) %>% 
+  distinct() %>% 
+  pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= sum(DE+FR+IT+ES)) %>% 
+  ungroup() %>% 
+pivot_longer(cols =c("EA19","EA4","DE","FR","IT","ES"),
+             names_to="geo",
+             values_to = "values") %>% 
+  filter(geo %in% c("EA19","EA4")) %>% 
+  group_by(geo) %>% 
+  arrange(time,.by_group=TRUE) %>% 
+  mutate(t1=values/lag(values)*100-100) %>% 
+  drop_na()
+
+ggplot(ea4 ,aes(time,t1,colour=geo,label=geo))+
+  geom_line(size=0.8) +
+  geom_text_repel(data=ea4 %>% filter(time==2002 & geo=="EA19"),aes(time,t1),nudge_x = 0.5, nudge_y = +1.5)+
+    geom_text_repel(data=ea4 %>% filter(time==2002 & geo=="EA4"),aes(time,t1),nudge_x = 0.5, nudge_y = -1.5)+
+  theme_regacc_line+
+  scale_color_manual(values = mypal)+
+  scale_x_continuous(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Growth rates of annual GDP and annualised quarterly indicator",
+       subtitle = "Current prices, not seasonally adjusted ",
+       tag = "Figure 2",
+       y="% change")
+```
+
+## Denton methods
+
+There are several variants of the Denton method depending what is the target (original series, first differences, second differences) and if we want to minimise the absolute (*additive*) or proportional differences (*proportional*). The two most common ones are the proportional and additive on first differences.
+
+The proportional Denton method on first differences will adjust the indicator in a way that the ratio of the benchmarked series and the indicator series remains as constant as possible. If the first quarter is raised by 5% it will try to raise as close to 5% as possible the other quarters. This is what is most commonly desired for economic time series. However, it cannot be used in series which can be zero or negative.
+
+```{r}
+
+a_ea19<-a_gdp %>% 
+  filter(unit=="CP_MEUR" & s_adj =="NSA") %>%
+  select(time,values) %>% 
+  arrange(time) 
+
+a_ea19_ts <- a_ea19 %>%  
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+q_ea4<-q_gdp %>% 
+filter(unit =="CP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    select(time,EA4) 
+
+q_ea4_ts <- q_ea4 %>% 
+  select(-time) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+denton_1p <- predict(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "proportional", h=1)) 
+
+denton_1p <- denton_1p %>%  
+  tsbox::ts_df()
+
+denton_1p <- full_join(denton_1p,q_ea4) %>% 
+  rename(EA19_denton_1p = "value") %>% 
+  mutate(benchmark = EA19_denton_1p - EA4) %>% 
+  pivot_longer(cols = c(2:4),
+               names_to="series",
+               values_to="values")
+
+ggplot(denton_1p ,aes(time,values,colour=series,label=series))+
+  geom_line(size=0.8) +
+    geom_text_repel(data=denton_1p %>% filter(time=="2015-01-01"),aes(time,values),nudge_x = 1, nudge_y = 350000)+
+  theme_regacc_line+
+  scale_color_manual(values = mypal)+
+  scale_x_date(breaks=breaks_pretty(4),expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+   expand_limits(y = 0)+
+    labs(title= "Denton proportional in first differences",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 3",
+       ylab = "EUR millions")
+
+```
+
+The additive first differences will make the changes in the indicator as constant as possible. If in the first quarter the correction is 1000, the corrections for the other quarters will be as close to 1000 as possible. It is suitable for series that have negative or zero values but it is not suitable for series with strong seasonality: all quarters will be adjusted for the same amount and we could even get negative values.
+
+```{r}
+a_ea19<-a_gdp %>% 
+  filter(unit=="CP_MEUR" & s_adj =="NSA") %>%
+  select(time,values) %>% 
+  arrange(time) 
+
+a_ea19_ts <- a_ea19 %>%  
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+q_ea4<-q_gdp %>% 
+filter(unit =="CP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    select(time,EA4) 
+
+q_ea4_ts <- q_ea4 %>% 
+  select(-time) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+denton_1a <- predict(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "additive", h=1)) 
+
+denton_1a <- denton_1a %>%  
+  tsbox::ts_df()
+
+denton_1a <- full_join(denton_1a,q_ea4) %>% 
+  rename(EA19_denton_1a = "value") %>% 
+  mutate(benchmark = EA19_denton_1a - EA4) %>% 
+  pivot_longer(cols = c(2:4),
+               names_to="series",
+               values_to="values")
+
+ggplot(denton_1a ,aes(time,values,colour=series,label=series))+
+  geom_line(size=0.8) +
+    geom_text_repel(data=denton_1a %>% filter(time=="2015-01-01"),aes(time,values),nudge_x = 1, nudge_y = 350000)+
+  theme_regacc_line+
+  scale_color_manual(values = mypal)+
+  scale_x_date(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  expand_limits(y = 0)+
+  labs(title= "Denton additive in first differences",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 4",
+       ylab ="EUR millions")
+
+```
+
+We can compare the two results looking at the year-on-year growth rates.
+
+```{r}
+denton<- full_join(denton_1p,denton_1a) %>% 
+  filter(series %in% c("EA19_denton_1p","EA19_denton_1a")) %>% 
+  group_by(series) %>% 
+  mutate(t4=values/lag(values,4)*100-100)
+
+ggplot(denton ,aes(time,t4,colour=series,label=series))+
+  geom_line(size=0.8) +
+    geom_text_repel(data=denton %>% filter(time=="2015-01-01" & series=="EA19_denton_1p"),aes(time,t4),nudge_x = 1, nudge_y = 2)+
+      geom_text_repel(data=denton %>% filter(time=="2015-01-01" & series=="EA19_denton_1a"),aes(time,t4),nudge_x = 1, nudge_y = -2)+
+  theme_regacc_line+
+  scale_color_manual(values = mypal)+
+  scale_x_date(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Denton proportional vs additive in first differences",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 5")
+```
+
+It is important to be aware of the adjustment done by denton for quarters for which we do not have a year to coerce (**open periods**).
+
+```{r}
+denton_1p<- denton_1p %>%
+  pivot_wider(names_from=series,
+              values_from=values) %>% 
+  mutate(bi=EA19_denton_1p*100/EA4)
+
+ggplot(denton_1p %>%  filter(time>="2020-01-01") ,aes(time,bi))+
+  geom_line(size=0.8, colour = luis_colors["fucsia"]) +
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4),labels = label_date_short(), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Denton extrapolated benchmark  for open years",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 6")+
+  theme(legend.position = "top")
+
+```
+
+It takes the latest benchmark adjustment available (q4 of the last closed year) and will use it in the following quarters until a new one will be calculated once the year is closed (annual data becomes available). This is not optimal when we observe a clear temporal pattern in the benchmark adjustment. We could use the recent pattern to improve the forecast of the benchmark adjustment. For example the IMF excel add-in for benchmarking includes that possibility, taking the average change of the latest periods.
+
+However, there exists more sophisticated methods to achieve it.
+
+## Regression methods
+
+Denton methods are mostly used when we have a limited choice to estimate the target variable, but we may be in a better situation when and have available different alternatives. We may have another indicator which is not GDP but also closely related to GDP covering all countries. Which one should we use? Denton does not offer an answer to this question but regression methods do. Additionally they can analyse the possible correlation of the residuals and model the error term as an $AR$ or $MA$. The most common regression method is Chow-Lin, which assumes an $AR(1)$ but there are most sophisticated ones, including the two step approach developed by INSEE (and available as an R package at <https://github.com/InseeFr/disaggR>).
+
+The output of a Chow-Lin regressions looks like this:
+
+```{r}
+summary(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-maxlog"))
+```
+
+Chow Lin gives us the coefficients and their significance. In this example we see that $\beta$ = 1.335 and an $AR(1)$ coefficient of 0.996. The $\beta$ indicates that the indicator series are lifted by 33.5% and the high $AR(1)$ tell us that once the results differ from the coefficient and are included in the residual, they will adjust very slowly to the mean. A small $AR(1)$ would mean the opposite.
+
+The results of Chow-Lin will be very similar, and under some conditions equal, to a proportional Denton. However, let's see how it extrapolates for the open quarters.
+
+```{r}
+chow_lin <- predict(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-maxlog")) %>% 
+tsbox::ts_df()
+
+chow_lin <- full_join(chow_lin,q_ea4) %>% 
+  rename(EA19_chow_lin = "value") %>% 
+  mutate(benchmark = EA19_chow_lin - EA4) %>% 
+    mutate(bi=EA19_chow_lin*100/EA4)
+
+ggplot(chow_lin %>%  filter(time>="2020-01-01") ,aes(time,bi))+
+  geom_line(size=0.8, colour = luis_colors["fucsia"]) +
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4), labels = label_date_short(),expand = expansion(add = 1))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Chow-Lin extrapolated benchmark  for open years",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 7")+
+  theme(legend.position = "top")
+```
+
+A complication of Chow-Lin models is that there are some decisions to make: do I specify an intercept? do I estimate maximizing the log of the likelihood or minimizing the square of the residuals? which number of iterations for calculating the AR parameter? Should we try some more advanced variations than Chow-Lin like Fernandez or dynamic models?
+
+All this requires an evaluation of the performance of the different possibilities. The model should be evaluated using the AIC or the BIC like in table 1. I this case there are no significant differences across the 4 models we use (with/without intercept - minrss/maxlog.
+
+```{r}
+chow_lin_maxlog <- summary(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-maxlog"))
+
+chow_lin_int_maxlog <- summary(td(a_ea19_ts ~ q_ea4_ts, method = "chow-lin-maxlog")) 
+
+chow_lin_minrss <- summary(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-minrss-ecotrim"))
+
+chow_lin_int_minrss <- summary(td(a_ea19_ts ~ q_ea4_ts, method = "chow-lin-minrss-ecotrim")) 
+
+
+aic <- list("chow_lin_maxlog"=chow_lin_maxlog$aic,
+            "chow_lin_int_maxlog"=chow_lin_int_maxlog$aic,
+            "chow_lin_minrss" =chow_lin_minrss$aic,
+            "chow_lin_int_minrss" =chow_lin_minrss$aic) %>%  
+ as_tibble() %>% 
+  mutate(statistic= "AIC")
+
+bic <- list("chow_lin_maxlog"=chow_lin_maxlog$bic,
+            "chow_lin_int_maxlog"=chow_lin_int_maxlog$bic,
+            "chow_lin_minrss" =chow_lin_minrss$bic,
+            "chow_lin_int_minrss" =chow_lin_minrss$bic) %>%  
+ as_tibble() %>% 
+    mutate(statistic= "BIC")
+
+summ<- bind_rows (aic,bic) %>% 
+  pivot_longer(cols= c(where(is.numeric)),
+               names_to="model",
+              values_to="values") %>% 
+  pivot_wider(names_from= statistic,
+              values_from=values)
+
+knitr::kable(summ,caption = "Model diagnostics")
+```
+
+But the results for the last quarters are a bit different depending on the model we choose.
+
+```{r}
+chow_lin_maxlog <- predict(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-maxlog"))%>% 
+tsbox::ts_df() %>% 
+  rename("chow_lin_maxlog"=value)
+
+chow_lin_int_maxlog <- predict(td(a_ea19_ts ~ q_ea4_ts, method = "chow-lin-maxlog")) %>% 
+tsbox::ts_df()%>% 
+  rename("chow_lin_int_maxlog"=value)
+
+
+chow_lin_minrss <- predict(td(a_ea19_ts ~ 0 + q_ea4_ts, method = "chow-lin-minrss-ecotrim"))%>% 
+tsbox::ts_df()%>% 
+  rename("chow_lin_minrss"=value)
+
+
+chow_lin_int_minrss <- predict(td(a_ea19_ts ~ q_ea4_ts, method = "chow-lin-minrss-ecotrim")) %>% 
+tsbox::ts_df()%>% 
+  rename("chow_lin_int_minrss"=value)
+
+
+models <- cbind(chow_lin_maxlog, chow_lin_int_maxlog[2],chow_lin_minrss[2], chow_lin_int_minrss[2]) %>% 
+  pivot_longer(cols=c(2:5),
+               names_to="model",
+               values_to="values") %>% 
+  group_by(model) %>% 
+  arrange(time) %>% 
+  mutate (t4=round(values/lag(values,4)*100-100,2)) %>% 
+  filter(time>="2020-07-01")
+
+models<- models %>% 
+  select(-values) %>% 
+  pivot_wider(names_from=model,
+              values_from=t4)
+
+knitr::kable(models,caption = "Year-on-year growth rates from different models")
+
+# ggplot(models,aes(t4,model))+
+#   geom_col(fill=luis_colors["fucsia"])+
+#   facet_grid(~time, scales="free_x")+
+#   theme_regacc_scatter+
+# #  coord_cartesian(expand=FALSE)+
+#     scale_x_continuous(breaks=breaks_pretty(4))+
+#   labs(title= "Figure 6: Year on year growth rates from different models",
+#        subtitle = "Current prices, not seasonally adjusted ")
+```
+
+One perceived disadvantage of the Chow-Lin approach is that previous quarters are revised for the complete time series when a new annual figures becomes available, as the model parameters get re-estimated. In the denton method the revision is limited to the most recent years.
+
+```{r}
+a_ea19<-a_gdp %>% 
+  filter(unit=="CP_MEUR" & s_adj =="NSA") %>%
+  select(time,values) %>% 
+  arrange(time) 
+
+a_ea19_ts_2020 <- a_ea19 %>%  
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+a_ea19_ts_2019 <- a_ea19 %>%
+  filter(time<2020) %>% 
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+q_ea4<-q_gdp %>% 
+filter(unit =="CP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    select(time,EA4) 
+
+q_ea4_ts <- q_ea4 %>% 
+  filter(time<="2020-10-01") %>% 
+  select(-time) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+chow_lin <- predict(td(a_ea19_ts_2020 ~  q_ea4_ts, method = "chow-lin-maxlog"))%>% 
+tsbox::ts_df() %>% 
+  rename("chow_lin"=value)
+
+chow_lin_py <- predict(td(a_ea19_ts_2019 ~ q_ea4_ts, method = "chow-lin-maxlog"))%>% 
+tsbox::ts_df() %>% 
+  rename("chow_lin_pq"=value)
+
+denton <- predict(td(a_ea19_ts_2020 ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "proportional", h=1)) %>% 
+  tsbox::ts_df() %>% 
+  rename("denton"=value)
+
+denton_py <- predict(td(a_ea19_ts_2019 ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "proportional", h=1)) %>% 
+  tsbox::ts_df() %>% 
+  rename("denton_pq"=value)
+
+
+revisions<- full_join(chow_lin,chow_lin_py) 
+revisions<- full_join(revisions,denton) 
+revisions<- full_join(revisions,denton_py) 
+
+revisions <- revisions %>% 
+  mutate(chow_lin=chow_lin-chow_lin_pq,
+         denton=denton-denton_pq) %>% 
+  select(time,chow_lin,denton) %>% 
+  pivot_longer(cols=c(2:3),
+               names_to="revisions",
+               values_to="values")
+
+ggplot(revisions ,aes(time,values,colour=revisions,label=revisions))+
+  geom_line(size=0.8) +
+      geom_text_repel(data=revisions %>% filter(time=="2020-01-01"),aes(time,values), nudge_y = 10000, nudge_x = -400)+
+  theme_regacc_line+
+  scale_color_manual(values = mypal)+
+  scale_x_date(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  labs(title= "Revision after new annual data added",
+       subtitle = "Current prices, not seasonally adjusted",
+       tag = "Figure 8")
+
+```
+
+## Issues for Main aggregates estimation
+
+In practice for main aggregates we will be close to have a quarterly indicator that represents 100% of the EU aggregate and the differences between the two will be due to vintage issues, imputations... The model we choose (Denton or any Chow Lin variant) will have very little impact. Denton is probably the most preferable option (simplicity, less revisions) but we should specify the additive variant for change in inventories.
+
+# Sequence of benchmarking and chain-linking
+
+It is probably more important to discern the impact to do benchmarking on previous year prices. Previous year prices is not a time series in annual data. We have $$Q_{T}·P_{T-1}$$ and $$Q_{T-1}·P_{T-2}$$ which is neither a volume or price series but a mixture of the two. In the case of quarterly series there is a volume time series except between quarters 4 and 1. The other quarters share the same prices and are a volume time series. We can see it clearly in Figure 7.
+
+```{r}
+pypq<- q_gdp %>% 
+  filter(unit =="PYP_MEUR" & geo =="EA19" & s_adj =="SCA" & time <="2019-10-01") %>%
+  arrange(time) %>% 
+  mutate(t1=values/lag(values)*100-100) %>% 
+  mutate(quarter=quarter(time))
+
+ggplot(pypq ,aes(time,t1))+
+  geom_line(size=0.8,colour=mypal[1]) +
+  geom_point(data=pypq %>% filter(quarter==1),aes(time,t1),size =3, colour=mypal[2])+
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1), expand=c(0,0))+
+  labs(title= "Quarter on quarter growth rates of previous year prices",
+       subtitle = "EA19 seasonally adjusted",
+       tag = "Figure 9")
+
+```
+
+If we use a proportional method which keeps unchanged the year on year growth rates, even if they do not have any meaning, we will keep the evolution of the sense-less indicator.
+
+```{r}
+a_ea19<-a_gdp %>% 
+  filter(unit=="PYP_MEUR" & s_adj =="NSA") %>%
+  select(time,values) %>% 
+  arrange(time) 
+
+a_ea19_ts_2020 <- a_ea19 %>%  
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+q_ea4<-q_gdp %>% 
+filter(unit =="PYP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    select(time,EA4) 
+
+q_ea4_ts <- q_ea4 %>% 
+  select(-time) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+denton <- predict(td(a_ea19_ts_2020 ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "proportional", h=1)) %>% 
+  tsbox::ts_df() %>% 
+  rename("denton"=value)
+
+denton <- full_join(denton,q_ea4) %>% 
+mutate(across(c(denton,EA4),~ ./lag(.)*100-100)) %>% 
+  pivot_longer(cols=c(denton,EA4),
+               names_to="series",
+               values_to="values")
+
+ggplot(denton %>%  filter(time >= "2010-10-01" & time<="2020-01-01") ,aes(time,values,colour=series))+
+  geom_line(size=0.8) +
+  scale_color_manual(values=mypal)+
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  theme(legend.position="bottom")+
+  labs(title= "Year on year growth rates of previous year prices",
+       subtitle = "EA19 not seasonally adjusted",
+       tag = "Figure 10")
+
+```
+
+Let us link the results and compare them with the results of chain linking the indicator and then benchmarking. In both cases we will use for linking the function developed by Statistics Austria for quarterly chain linking and available in their [github](https://github.com/statistikat/chainSTAT).
+
+```{r}
+pyp <- predict(td(a_ea19_ts_2020 ~ 0 + q_ea4_ts, method = "denton-cholette", criterion = "proportional", h=1))
+
+cup<-q_gdp %>% 
+  filter(unit=="CP_MEUR" & s_adj =="NSA" & geo =="EA19") %>%
+  arrange(time) %>% 
+    select(values) %>%
+    ts(start = c(2000, 1), frequency = 4)
+
+# Author Julia Knoebl
+#' Creates chainlinked time series with annual overlap
+#'
+#' Using the annual overlap approach this function chainlinks univariate time series with respect to the given base year.
+#' @param cup univariate time series at current prices (cup)
+#' @param pyp univariate time series at previous year prices (pyp)
+#' @param ref_year Base year. Defaults to 2010
+#' @param index If TRUE it returns an index series, where the base year is 100, if FALSE returns volume series. Defaults to FALSE.
+#'
+#' @return a univariate time series with volume or index values
+#' @details For more information on Annual Overlap consult the IMF Manual for QNA (p.185, §71) or Eurostats Handbook on QNA (p. 184, §6.47)
+#' @export
+
+chainlinkAO <- function(cup,
+                        pyp,
+                        ref_year = 2015,
+                        index = F) {
+  # delete NA values to avoid resulting errors
+  cup <- stats::na.omit(cup)
+  pyp <- stats::na.omit(pyp)
+
+  if (stats::time(cup)[1] > stats::time(pyp)[1]){
+    pyp <- stats::window(pyp, start = stats::start(cup))
+  } else if (stats::time(cup)[1] < stats::time(pyp)[1]){
+    cup <- stats::window(cup, start = stats::start(pyp))
+  }
+  if (stats::time(cup)[length(cup)] < stats::time(pyp)[length(pyp)]){
+    pyp <- stats::window(pyp, end = stats::end(cup))
+  } else if (stats::time(cup)[length(cup)] > stats::time(pyp)[length(pyp)]){
+    cup <- stats::window(cup, end = stats::end(pyp))
+  }
+
+  # the following errors should only ocur when the truncation of series failes
+  if (length(cup) != length(pyp)) {
+    stop("Values at current (cup) and previous year prices (pyp) need to have the same length")
+  }
+  if (stats::frequency(cup) != stats::frequency(pyp)) {
+    stop("Values at current (cup) and previous year prices (pyp) need to have the same frequency")
+  }
+  if (all(stats::start(cup) == stats::start(pyp)) == F) {
+    warning("Values at current (cup) and previous year prices (pyp) should start at the same time")
+  }
+
+  vol <- NULL
+
+  if (stats::frequency(cup) == 1) {
+    growthRate <- log(pyp / stats::lag (cup, k = -1))
+    vol <-
+      stats::ts(NA,
+                start = stats::start(cup),
+                end = stats::end(cup))
+    vol[stats::time(vol) == ref_year] <- cup[stats::time(cup) == ref_year]
+    vol[stats::time(vol) > ref_year] <-
+      cup[stats::time(cup) == ref_year] * exp(cumsum(growthRate[stats::time(growthRate) > ref_year]))
+    vol[stats::time(vol) < ref_year] <-
+      cup[stats::time(cup) == ref_year] / rev(exp(cumsum(rev(growthRate[stats::time(growthRate) <= ref_year]))))
+  } else {
+    # which is the last quarter?
+    lastq <- stats::cycle(cup)[length(cup)]
+
+    # Yearly averages (of the available points in time)
+    av <- lapply(c("cup", "pyp"), function(x){
+      input <- get(x)
+      zr <- rep(stats::aggregate(input, FUN = mean),
+                each = stats::frequency(input))
+      if(lastq < 4){
+        zr <- c(zr,
+                rep(mean(stats::window(input, start = stats::end(input)[1])),
+                    lastq))
+      }
+      stats::ts(zr,
+                start = stats::start(input),
+                frequency = stats::frequency(input))
+    }) %>%
+      `names<-`(c("cup", "pyp"))
+
+    # at yearly averaged prices
+    jdp <- cup *
+      (av$cup / av$pyp) /
+      (cup / pyp)
+
+    vol <-
+      stats::ts(
+        NA,
+        start = stats::start(jdp),
+        end = stats::end(jdp),
+        frequency = stats::frequency(jdp)
+      )
+
+    # in the base year it equals the yearly averages
+    vol[stats::time(vol) >= ref_year &
+          stats::time(vol) < (ref_year + 1)] <-
+      jdp[stats::time(vol) >= ref_year &
+            stats::time(vol) < (ref_year + 1)]
+
+    # calculate growth rates before and after
+    # only if there are observations before base year
+    if(stats::time(vol)[1] < ref_year){
+      before <- stats::window(jdp / stats::lag(jdp),
+                              end = c(ref_year, 0))
+      # To ensure coninious TS over the years we correct
+      #  - the 4th quarter BEFORE the base year (Q4 at yearly average/Q1 at pyp (same price!)  -> growth rate)
+      #  - the 1st quarter AFTER the base year (Q1 at pyp/Q4 at yearly average (same price!)  -> growth rate)
+      q4_cor <- jdp / stats::lag(pyp)
+
+      before[(stats::cycle(before) == 4)] <- q4_cor[(stats::cycle(q4_cor) == 4) & (stats::time(q4_cor) < ref_year)]
+      # Cumulative products of growth rates on the base year
+      vol[stats::time(vol) < ref_year] <-
+        exp(rev(cumsum(rev(log(before))))) * vol[stats::time(vol) == ref_year]
+    }
+    # only if there are observations after the base year
+    if(stats::time(vol)[length(vol)]>= ref_year + 1){
+      after <- stats::window(jdp / stats::lag(jdp, k = -1),
+                             start = ref_year + 1)
+      # To ensure coninious TS over the years we correct
+      #  - the 4th quarter BEFORE the base year (Q4 at yearly average/Q1 at pyp (same price!)  -> growth rate)
+      #  - the 1st quarter AFTER the base year (Q1 at pyp/Q4 at yearly average (same price!)  -> growth rate)
+      q1_cor <- pyp / stats::lag(jdp, k = -1)
+
+      after[(stats::cycle(after) == 1)] <- q1_cor[(stats::cycle(q1_cor) == 1) & (stats::time(q1_cor) >= (ref_year + 1))]
+
+
+      # Cumulative products of growth rates on the base year
+      vol[stats::time(vol) >= (ref_year + 1)] <-
+        exp(cumsum(log(after))) * vol[stats::time(vol) == ref_year + 1 - 1/stats::frequency(vol)]
+    }
+  }
+  if (index) {
+    vol <- vol / stats::aggregate(cup, FUN = mean)[stats::time(stats::aggregate(cup)) == ref_year] * 100
+  }
+  return(vol)
+}
+
+pyp_clv <- chainlinkAO(cup,pyp,ref_year = 2015, index=F) %>% 
+  tsbox::ts_df() %>% 
+  rename(pyp_clv=value)
+
+# now link the indicator and benchmark
+q_ea4_cup<-q_gdp %>% 
+filter(unit =="CP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    arrange(time) %>% 
+    select(EA4) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+q_ea4_pyp<-q_gdp %>% 
+filter(unit =="PYP_MEUR" & s_adj=="NSA" & na_item=="B1GQ") %>% 
+  select(-unit,-s_adj,-na_item) %>% 
+  arrange(time) %>% 
+    pivot_wider(names_from=geo,
+              values_from=values) %>% 
+  mutate(EA4= DE+FR+IT+ES) %>% 
+    arrange(time) %>% 
+    select(EA4) %>% 
+  ts(start = c(2000, 1), frequency = 4)
+
+q_ea4_clv<- chainlinkAO(q_ea4_cup,q_ea4_pyp,ref_year=2015, index=F)
+
+a_ea19_clv <- a_gdp %>% 
+  filter(unit =="CLV15_MEUR" & s_adj=="NSA" & na_item=="B1GQ" & geo=="EA19") %>%
+  arrange(time) %>% 
+  select(values) %>% 
+  ts(start = c(2000, 1), frequency = 1)
+
+clv_clv <- predict(td(a_ea19_clv ~ 0 + q_ea4_clv, method = "denton-cholette", criterion = "proportional", h=1)) %>% 
+    tsbox::ts_df() %>% 
+  rename(clv_clv=value)
+
+compare<- full_join(pyp_clv,clv_clv) %>% 
+  pivot_longer(cols=c(2:3),
+               names_to="series",
+               values_to="values") %>%
+  group_by(series) %>% 
+  mutate(t4= values/lag(values,4)*100-100)
+
+ggplot(compare %>%  filter(time >= "2010-10-01" & time<="2019-10-01") ,aes(time,t4,colour=series))+
+  geom_line(size=0.8) +
+  scale_color_manual(values=mypal)+
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4), expand=c(0,0))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1))+
+  theme(legend.position="bottom")+
+  labs(title= "Year on year growth rates of chain linked series",
+       subtitle = "Estimate of EA19 not seasonally adjusted",
+       tag = "Figure 11")
+```
+
+We can see that the results are not so different between benchmarking in previous year prices and then linking (*pyp_clv*) and chain linking the indicator and then benchmarking (*clv_clv*). It is interesting to verify if the (absolute) differences occur in all quarters or if they happen in specific quarters.
+
+```{r}
+compareq<- compare %>% 
+  mutate(quarter=quarter(time)) %>% 
+  select(-values) %>% 
+  pivot_wider(names_from ="series",
+              values_from=t4) %>% 
+  mutate(diff=abs(pyp_clv - clv_clv)) %>% 
+  group_by(quarter) %>% 
+  summarise(difference=round(mean(diff,na.rm=TRUE),3))
+
+knitr::kable(compareq,caption = " Average absolute difference in year-on-year growth rates between benchmarking-linking and linking-benchmarking")
+```
+
+Differences turn out to be negligible on average but looking in more detail, it would seem that Q2 and Q3 tend to be somehow closer than Q1 and Q4.
+
+```{r}
+compareq<- compare %>% 
+  mutate(quarter=quarter(time))
+
+ggplot(compareq %>%  filter(time >= "2014-10-01" & time<="2019-10-01") ,aes(time,t4,colour=series))+
+  geom_line(size=0.8) +
+  facet_grid(~quarter)+
+  scale_color_manual(values=mypal)+
+  theme_regacc_line+
+  scale_x_date(breaks=breaks_pretty(4))+
+  scale_y_continuous(breaks=breaks_pretty(4), labels = label_number(1), expand=c(0,0))+
+  theme(legend.position="bottom")+
+  labs(title= "Year on year growth rates of chain linked series",
+       subtitle = "Estimate of EA19 not seasonally adjusted",
+       tag = "Figure 12")
+```
+
+## Issues for Main aggregates estimation
+
+Differences between both sequences seems not to justify a radical change of the current practice once we have in mind the advantages of using an indicator in previous year prices for change in inventories. Chain linking the indicator will slightly complicate the procedure and change in inventories will need to be estimated purely as a residual. Nonetheless it is good to be aware of the lack of theoretic foundations of the current approach.
