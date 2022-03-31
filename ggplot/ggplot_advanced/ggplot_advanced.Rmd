@@ -1,0 +1,446 @@
+---
+title: "{ggplot2}"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  fig.height = 9,
+  fig.width = 12
+)
+```
+
+# Introduction 
+
+{Ggplot2} is the default tool for producing charts in R. There are many good books about it and the basic principles are a standard section of most R books. Here I would follow a similar approach as Cédric Scherer and go through the steps of modifying a ggplot (<https://www.cedricscherer.com/2019/08/05/a-ggplot2-tutorial-for-beautiful-plotting-in-r/>).
+
+
+# Loading the data
+
+```{r}
+library(tidyverse)
+
+df<- data.table::fread("data/gdp2v.csv") %>% 
+  filter(unit=="PPS_HAB_EU27_2020") %>% 
+filter(time == 2018) %>% 
+  mutate(country=str_sub(geo,1,2),
+         NUTS=str_length(geo)-2) %>% 
+  filter(NUTS=="2") %>% 
+  select(-obs_decimals,-obs_status, -unit,-NUTS) %>% 
+  filter(!country %in% c("AL", "CY", "EE", "LU","LV","ME","MK","MT","NO","RS"))
+```
+
+
+We load the regional GDP as percentage the EU for NUTS 2 regions for the years 2008 and 2018 and we end up with 481 observations and 4 columns.
+
+```{r}
+glimpse(df)
+```
+
+## A basic plot
+
+We start by defining the dataset to use and the layout. In our case we will have the **country** in the **x** axis and the values in the **y** axis.
+
+```{r}
+(ggplot(df, aes(x= country, y= obs_value)))
+```
+
+Now we have to tell ggplot how do we want to plot the data. We use `geom_*`for that. Let's say we want to plot dots.
+
+```{r}
+g <- ggplot(df, aes(x= country, y= obs_value))
+
+g + geom_point()
+```
+
+We could plot a line.
+
+```{r}
+g + geom_line()
+```
+
+Or a line and a dot.
+
+```{r}
+g + geom_point() + geom_line()
+```
+
+Within `geom_*`we can control some aesthetics like colour, shape, size.
+
+```{r}
+g + geom_point (color="steelblue", size = 3.5, shape = "diamond")
+```
+
+Each `geom_` has its own arguments. For example there is no shape for `geom_line`or linetype for `geom_point`.
+
+```{r}
+g + 
+  geom_point (color="steelblue", size = 3.5, shape = "diamond")+
+  geom_line(color="darkred", size = 0.5, linetype = "dashed")
+
+```
+
+Also the order of the geoms (which one shows first) affects the results.
+```{r}
+g + 
+  geom_line(color="darkred", size = 0.5, linetype = "dashed")+
+  geom_point (color="steelblue", size = 3.5, shape = "diamond")
+
+```
+
+
+We can change the default `theme` in ggplot. If we set the theme using `theme_set()` to {theme_bw} we do not have any longer the grey background and other aesthetics also change.
+
+```{r}
+theme_set(theme_bw())
+
+g + geom_point(color = "steelblue", size =2.5)
+```
+
+You can override a particular thing of a theme, and there are many particular things (<https://ggplot2.tidyverse.org/reference/theme.html>). For example remove the minor gridlines.
+
+```{r}
+g + geom_point(color = "steelblue", size =2.5)+
+    theme(panel.grid.minor = element_blank())
+
+```
+
+# Axes
+
+## Change Axis title
+
+Let's add some titles to the axes. We can do it with the function `labs`.
+
+```{r}
+g + geom_point(color = "steelblue", size =2.5)+
+  labs( x = "Country",  y= "As percentage of the EU in PPS")
+
+```
+
+or with `xlab()` and `ylab()`
+
+```{r}
+g + geom_point(color = "steelblue", size =2.5)+
+  xlab( "Country") +
+  ylab( "As percentage of the EU in PPS")
+
+```
+
+We can add symbols, formulas or use superscripts:
+
+```{r}
+g + geom_point(color = "steelblue", size =2.5)+
+  labs( x = "Country",  y= expression(paste("As percentage of the EU in PPS" ^" EU27 =100")))
+
+```
+
+## Space between Axis and axis titles
+
+We will use `theme()` to modify particular elements (text, background, boxes...). To modify text elements we use `element_text()`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+  labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.title.x = element_text(vjust = 0, size = 15),
+        axis.title.y = element_text(vjust = 3, size = 15))
+```
+
+`vjust`refers to the vertical alignment.  
+
+We can do the same with `margin()`
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+  labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.title.x = element_text(margin = margin(t = 10), size = 15),
+        axis.title.y = element_text(margin = margin(t = 10), size = 15))
+```
+
+`margin()`takes the arguments `t` (top), `r` (right), `b` (bottom) and `l` (left).
+
+## Change Aesthetics of Axis titles
+
+With `axis.title`we can modify the size, colour and face (bold, italic or bold.italic.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.title = element_text(size = 15, color = "steelblue",
+                                  face = "italic"))
+```
+
+We can do it individually for each axis (this is available in most options).
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.title.x = element_text(size = 15, color = "steelblue",
+                                  face = "italic"),
+        axis.title.y = element_text(size = 12, color = "darkred",
+                                  face = "bold"))
+
+```
+
+## Change Aesthetics of Axis text
+
+You can change the aesthetics of the axis text with `axis.text`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.text.x = element_text(size = 10, color = "steelblue",
+                                  face = "italic"),
+        axis.text.y = element_text(size = 12, color = "darkred",
+                                  face = "bold"))
+```
+
+## Rotate axis text
+
+Specifying an `angle` allows you to rotate any text elements.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.text.x = element_text(angle = 50, size = 12))
+```
+
+In that case w will normally need to adjust the distance to the axis.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+  theme(axis.text.x = element_text(angle = 50, size = 12, hjust = 1.5),
+        axis.text.y = element_text(angle = 50, size = 12, vjust = -0.5))
+```
+
+`hjust` and `vjust` are a bit confusing!
+
+## Remove axis text and ticks
+
+Not very recommended or usual but can be done. Most things are removed using `element_blank()`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs(x = "Country", y = "As percentage of the EU in PPS") +
+   theme(axis.ticks.x = element_blank(),
+        axis.text.y = element_blank())
+```
+
+There is `element_text`, `element_line`, `element_rectangle` and `element_blank`. We have seen so far `element_text`and `element_blank`.
+
+## Remove Axis titles
+
+This is more common as sometimes the title of the chart indicates it or is self-evident, like the x axis in our case.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = NULL) 
+  
+```
+
+Sometimes you do not remember the option *NU* and force it to print nothing with `""`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "") 
+```
+
+## Limit the Axis range
+
+Sometimes you want to get a better view at some range of your data. You can do this without filtering your data:
+
+```{r}
+
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "") +
+    ylim(c(50, 150))
+```
+
+Alternatively you can use `scale_y_continuous(limits = c(bottom,top ))` which does the same or `coord_cartesian(ylim = c(bottom, top))` There is a subtle difference between the two, in the second case we really subset the data while in the first we only limit the axis (look at EL and PL!)
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "") +
+ coord_cartesian(ylim = c(50, 150))
+```
+
+## Coordinates
+
+Let's change a bit our dataset to illustrate the point.
+```{r}
+df2 <-data.table::fread("data/gdp2v.csv") %>% 
+  filter(unit=="PPS_HAB_EU27_2020") %>% 
+filter(time == 2008| time == 2018) %>% 
+  pivot_wider(names_from = time,
+              values_from = obs_value,
+              names_prefix = "y") %>% 
+  mutate(country=str_sub(geo,1,2),
+         NUTS=str_length(geo)-2) %>% 
+  filter(NUTS=="2") %>% 
+  select(-obs_decimals,-obs_status, -unit,-NUTS) %>% 
+  filter(!country %in% c("AL", "CY", "EE", "LU","LV","ME","MK","MT","NO","RS"))
+```
+
+Let force it to start at zero.
+```{r}
+ggplot(df2, aes(y2008,y2018))+
+    geom_point(color = "steelblue", size =2.5) +
+  expand_limits(x = 0, y = 0)
+```
+
+Really at zero!
+```{r}
+ggplot(df2, aes(y2008,y2018))+
+    geom_point(color = "steelblue", size =2.5) +
+    expand_limits(x = 0, y = 0) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(clip = "off")
+
+```
+The argument clip = "off" allows to draw outside the panel area.
+
+## Scaling of the axis
+
+We could force the ratio of the axis. The default, ratio = 1, ensures that one unit on the x-axis is the same length as one unit on the y-axis. It can be illustrated better in this chart.
+
+```{r}
+ggplot(df2, aes(x = y2008, y = y2018)) +
+  geom_point(color = "steelblue", size =2.5) +
+    ylim(c(50, 150))+
+   xlim (c(20,200))
+```
+
+Ratios higher than one in `coord_fixed()`  make units on the y axis longer than units on the x-axis, and vice-versa.
+
+```{r}
+ggplot(df2, aes(x = y2008, y = y2018)) +
+  geom_point(color = "steelblue", size =2.5) +
+coord_fixed(ratio = 1.5)
+```
+
+## Use a Function to Alter Labels
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "") +
+  scale_y_continuous(label = function(x) {return(paste(x, "pp"))})
+```
+
+# Titles
+
+We can add a simple title via the `ggtitle()` function:
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "")+
+  ggtitle ("GDP per capita in EU regions")
+```
+
+Or use `labs()` and add much more arguments.
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions",
+       subtitle = "Year 2018",
+       caption = "Data: Eurostat, nama_10_2gdp",
+       tag = "Fig. 1")
+
+```
+
+## Adjust the title 
+
+We use `theme()`as we did with `axis.title` and `axis.text`. The same principles can be used for other elements `plot.subtitle`, `plot.caption`, `plot.caption`, `legend.title` and `legend.text`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions")+
+  theme(plot.title = element_text(face = "bold",
+                                  margin = margin(10, 0, 10, 0),
+                                  size = 16))
+```
+
+## Adjust the position of the title
+
+The horizontal adjustment (left,center,right) is controlled by  by `hjust`. For centering we use 0.5 and to the right 1.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions")+
+  theme(plot.title = element_text(face = "bold",
+                                  margin = margin(10, 0, 10, 0),
+                                  size = 16,
+                                  hjust =0.5))
+```
+
+We can also adjust it vertically with `vjust`.
+
+To move the title outside the panel we can use `plot.title.position` if we have long titles
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions in 2018 as percentage of the EU GDP in Purchasing Power Standards")+
+  theme(plot.title.position = "plot")
+```
+
+## Change space in multiline text
+
+You can have multiline titles using ´/n`
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions in 2018\n as percentage of the EU GDP in Purchasing Power Standards")
+```
+
+And adjust the space between lines with `lineheight`.
+
+```{r}
+ggplot(df, aes(x = country, y = obs_value)) +
+  geom_point(color = "steelblue", size =2.5) +
+   labs( y = "As percentage of the EU in PPS",
+         x = "",
+         title = "GDP per capita in EU regions in 2018\n as percentage of the EU GDP in Purchasing Power Standards")+ 
+  theme(plot.title = element_text(lineheight = 0.7, size = 16))
+  
+```
+

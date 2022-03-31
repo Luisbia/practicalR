@@ -1,0 +1,177 @@
+---
+title: "File search"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+---
+
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = FALSE,
+                      message= FALSE,
+                      warning= FALSE)
+```
+
+
+
+We will use the following packages but mostly we will cover base R functions.
+
+```{r}
+
+packages = c("tidyverse", "rstudioapi", "glue")
+
+## Now load or install&load all
+package.check <- lapply(
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+    }
+  }
+)
+```
+
+## Simple search of files in a single folder
+
+Look for all the files in a folder. Careful with the `/` instead of the `\` you get if you paste this from windows.
+
+```{r,file1}
+example1 <- list.files(path = "U:/03_Regional Accounts/03D_Data Production/2020/ES/transmission")
+head (example1)
+```
+
+But normally we will want to restrict to certain type of files, like xml.
+
+```{r,file2}
+example2 <- list.files(path = "U:/03_Regional Accounts/03D_Data Production/2020/ES/transmission",
+                       pattern = "*.xml")
+head (example2)
+```
+
+## Simple search of files in subfolders
+
+If we want to look also in sub-folders we have to change the option **recursive** to `TRUE`. To look inside of the sub-folders of ES for example:
+
+```{r,file3}
+example3 <- list.files(path = "U:/03_Regional Accounts/03D_Data Production/2020/ES",
+                       pattern = "*.xlsx",
+                       recursive = TRUE)
+head (example3)
+```
+
+
+If we want to look for a more specific pattern  and we are not familiar with regular expressions we should use `glob2rx`. For example to look files that starts with **t**, include **01** and end with **.xlsx**. 
+
+```{r,file4}
+example4 <- list.files(path="U:/03_Regional Accounts/03D_Data Production/2020/ES/matis",
+            pattern = glob2rx("t*_01*.xlsx"),
+            full.names = FALSE,
+            recursive = TRUE )
+
+head (example4)
+```
+
+`glob2rx` translates a *normal* expression into a *regular* expression. Regular expressions are very powerful but difficult to construct.
+
+```{r}
+glob2rx("t*_01*.xlsx")
+```
+
+
+## Listing folders
+
+Some times we want first to subset the folders where to look. We might want to look only for files in particular folders. To get the list of folders we use `dir`. To look only in the folders that contain **202109** and **_LOADED_**.
+
+```{r}
+dir(path = "//fame2prod.cc.cec.eu.int/fame-estat/econ/NAMA2010/ARCHIVE/ES",
+    pattern = glob2rx("202109*LOADED*"))
+```
+
+## Adding variables to the search
+
+It is easy to use a parameter for the search by creating variable(s) which can be concatenated to a string with `paste0`. We define a month and a country variable. 
+
+```{r}
+month<- "202111"
+country <- "ES"
+
+paste0(month, "*LOADED*")
+```
+
+
+```{r}
+paste0("//fame2prod.cc.cec.eu.int/fame-estat/econ/NAMA2010/ARCHIVE/", country)
+```
+
+
+```{r,file5}
+example5 <- dir(path = paste0("//fame2prod.cc.cec.eu.int/fame-estat/econ/NAMA2010/ARCHIVE/", country),
+    pattern = glob2rx(paste0(month, "*LOADED*")))
+
+example5
+```
+
+The output of these operations is a vector of characters that we can pass on. Let's create a list of folders for data loaded in 2021 for ES an FR and look in them for table 0101A.
+
+**Very, very important** is to remember that when we want to reuse the output we will need to specify th option **full.names = TRUE**. This workflow, and any other (copy, rename), does not work with relative paths.
+
+```{r,file6}
+year<- "2021"
+country <- c("FR","ES")
+table <- "A_T0101"
+
+example6 <- dir(path = paste0("//fame2prod.cc.cec.eu.int/fame-estat/econ/NAMA2010/ARCHIVE/", country),
+    pattern = glob2rx(paste0(year, "*LOADED*", table, "*")),
+    full.names = TRUE)
+
+example6
+
+list.files(
+     path = example6,
+     pattern = glob2rx("NAMAIN_T0101*_A_*.xml.csv$"),
+     full.names = FALSE,
+     recursive = TRUE )
+```
+
+This is one of the operations that takes more time in our workflow (in NAMA). It is very important to restrict the range of the search as much as possible.
+
+Another option I use often for big searches is to rely on `{glue}` with `list.dirs`.We need to insert with `{}` the variable in the string. 
+
+```{r}
+glue("U:/03_Regional Accounts/03D_Data Production/2020/{country}/matis/")
+```
+
+```{r,file7}
+mydir<-list.dirs(glue("U:/03_Regional Accounts/03D_Data Production/2020/{country}/matis/"),
+                 recursive=TRUE,
+                 full.names = TRUE) 
+mydir
+
+example7 <- list.files(path= mydir,
+           full.names=TRUE,
+           pattern=glob2rx("t*.xlsx"),
+           recursive=FALSE)
+
+head (example7)
+```
+
+## User selection
+
+Sometimes it is better to let the user indicate us where to look. We need to use `selectDirectory` or `selectFile` from `{rstudioapi}`.
+
+```{r,eval= FALSE}
+
+country <- "ES"
+
+path_q_csv<- selectDirectory(
+  caption = "Select Quarterly data ",
+  label = "Select",
+  path = glue("//fame2prod.cc.cec.eu.int/fame-estat/econ/NAMA2010/ARCHIVE/{country}/")
+)
+```
+

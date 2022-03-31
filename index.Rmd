@@ -1,0 +1,55 @@
+---
+title: "PracticalR: Index"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+## Comprehensive
+
+- [File and folder operations](file_folder/file_folder_operations.html)
+
+- [File search](file_search/file_search.html)
+
+- [Loading files into R](loading_files/Loading_files_in_R.html)
+
+- [Sending output to Excel](Excel_output/Excel_output.html)
+
+## Intermediate
+
+-   [Making many regression with list columns and broom](broom/broom_list_cols_regression.html)
+
+- [Benchmarking for dummies](MA/benchmarking_theory/benchmarking_theory.html)
+
+- [Linking objects with crosstalk for exploratory analysis](crosstalk/crosstalk_DT_plotly.html)
+
+- [Auditing excel files with tidyxl](tidyxl/tidyxl_excel_audit.html) 
+
+## ggplot2
+
+- [ggplot basics](ggplot/ggplot_basics/ggplot_basic.html) **wip**
+
+- [geoms and extensions](ggplot/ggplot_geoms/ggplot_geoms.html) **wip**
+
+- [advanced customisation](ggplot/ggplot_advanced/ggplot.html) **wip**
+
+- [A personal palette function](ggplot/palette/Create_palette.html)
+
+- [A custom theme](ggplot/ggplot_custom_theme/Create_custom_theme.html)
+
+- [gghighlight](ggplot/ggplot_gghighlight.html)
+
+## Maps
+
+- [A nice map](maps/ggplot_EU_regions_map.html)
+
+- [Animated map](maps/gganimate.gif), [code](maps/ggplot_gganimate_map.Rmd)
+
+- [Insets on maps](maps/ggplot_cowplot__inset_maps.html)
+
+
+## Miscelaneous
+
+- [Some utilities](useful/useful.html)

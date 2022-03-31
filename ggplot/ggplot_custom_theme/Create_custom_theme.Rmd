@@ -1,0 +1,500 @@
+---
+title: "Create a custom theme for ggplot2"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  fig.height = 9,
+  fig.width = 12
+)
+```
+
+There are many nice themes available in `{ggplot2}` and in other packages like `{ggthemes}` or `{hrbrthemes}`. We could get a decent first chart with them but for finished products we will normally need to make some small adjustments.
+
+However, at some stage it is worth the effort to create your own theme with the defaults you normally apply to most of the charts you create.
+
+There are many parameters to define a theme. The basis of ggplot themes is `theme_grey`, which is ggplot default. The remaining themes are changes to that basic theme. For example, `theme_minimal` applies changes to `theme_bw` which is based on `theme_grey`. Let’s see the changes `theme_minimal` does: basically removing a lot of things with `element_blank()`.
+
+```{r}
+library(tidyverse)
+
+theme_minimal
+```
+
+We have the plot components (axis.ticks, legend.background, etc). They are either `element_text()` like the title, `element_rect()` like the panel background, `element_line()` like the axis lines or `element_blank()` if we want to remove them.
+
+
+Let's start with the default `theme_minimal´ and we will be introducing  some elements we want for our custom theme.
+
+```{r}
+df <- data.table::fread("data/gdp2v.csv") %>% 
+    filter(geo %in% c ("ES30", "ES51", "ES61", "ES52") & 
+           unit =="MIO_EUR") 
+
+p <- ggplot()+
+  geom_line(data = df , aes(time,obs_value,colour=geo),size = 1)+
+  scale_color_brewer(palette="Pastel1")+
+  labs(title = "Evolution of GDP in the biggest Spanish regions")+
+  theme_minimal(base_family = 14)
+
+p
+
+```
+
+
+## Font and base colour
+
+If we use a single font we can set it for all the text elements. We are going to use a google font. You can check available fonts with `font_families_google()`. We also set a base_size
+
+```{r}
+library(showtext)
+## Loading Google fonts (https://fonts.google.com/)
+font_add_google("Roboto", "roboto")
+
+
+showtext_auto()
+
+p <- p+ theme(text = element_text(family = "roboto", size = 18))
+p
+```
+I also define a base colour (#14509E) that will be used by several elements.
+
+```{r}
+base_colour <- "#14509E"
+```
+
+## Plot background
+
+We fill the background in white and add a line with our base colour.
+
+```{r}
+p <- p +   theme(plot.background = element_rect(fill= "white", 
+                                       colour = base_colour))
+p
+```
+
+
+## Panel background
+
+We add a very light gray to the panel background and add our base colour.
+
+```{r}
+p <- p + theme(panel.background = element_rect(fill= "#FAFAFA",
+                                              colour = base_colour))
+p
+```
+
+## Grid
+
+We make horizontal grid lines dotted with a colour we will use in most elements. We leave the vertical major lines and minor lines with the default.
+
+```{r}
+p <- p+ theme(panel.grid.major.y = element_line(colour=base_colour, linetype = "dotted"))
+p
+```
+
+## Axis lines
+
+We give the base colour and make them slightly relative thicker.
+
+```{r}
+p <- p + theme(axis.line.x = element_line(colour=base_colour, 
+                                           size =rel(1.2)),
+                axis.line.y = element_line(colour= base_colour, 
+                                           size= rel(1.2)))
+p
+```
+
+## Axis text
+
+```{r}
+p <- p + theme(axis.text.x = element_text(colour=base_colour, size =rel (1.1)),
+                axis.text.y= element_text(colour= base_colour, size= rel(1.1), 
+                                           hjust=0))
+p
+```
+
+## Axis ticks
+
+```{r}
+p <- p + theme( axis.ticks = element_line(size =rel(1.5),
+                                           colour = base_colour))
+
+p
+```
+
+
+## Axis title
+
+In most circumstances we will not use it for the x axis (time) and we change the placement in the vertical axis and made it italic
+```{r}
+
+p<- p + theme(axis.title.x = element_blank(),
+              axis.title.y = element_text(size = rel(0.9),
+                                          colour=base_colour,
+                                          angle = 0, 
+                                          vjust = 1,
+                                          face = "italic"))
+p
+```
+
+## Legend
+
+We start by placing them in the bottom
+
+```{r}
+p <- p + theme(legend.position = "bottom")
+p
+```
+
+We remove the tile of the legend, make white the boxes and create some add some lines around it.
+
+```{r}
+
+p <- p + theme(legend.title = element_blank(),
+           legend.key = element_rect(fill= "white",colour = NA),
+           legend.background = element_rect(fill="white", colour = NA, linetype = "solid"),
+           legend.text = element_text(colour= base_colour))
+
+p
+```
+
+## Title, subtitle, caption
+
+We make the title bold, of bigger size and change the margins.
+
+```{r}
+p <- p + theme(plot.title = element_text(face= "bold", 
+                                          colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.3), 
+                                          margin = margin(10,0,10,0)))
+p
+```
+
+We do something similar for the subtitle:
+
+```{r}
+p <- p + labs(subtitle = "Million of Euros")+
+  theme (plot.subtitle = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.1), 
+                                          margin = margin(0,0,10,0)))
+p
+```
+And the caption and tag
+```{r}
+p <- p + labs(caption = "Source: Eurostat")+
+  theme (plot.caption = element_text(    colour =base_colour, 
+                                          hjust =1,
+                                          size = rel(1.0)),
+         plot.tag = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.0)))
+p
+```
+
+
+## Facets
+
+We are almost done. Let's also fix other aspects that we may use sometimes (facets).
+
+```{r}
+p <- ggplot()+
+  geom_line(data = df , aes(time,obs_value),size = 1, colour = "#AF4B91")+
+ facet_wrap(~geo)
+p
+```
+
+We set the strip background to our base color.
+```{r}
+p <- p + theme(strip.background = element_rect(fill = base_colour, 
+                                                colour = NA))
+p
+```
+And the strip text to white, bold and give some space to the left border.
+
+```{r}
+p<- p + theme(strip.text = element_text(face = "bold", 
+                                          size = 18, 
+                                          hjust = 0.2,
+                                          colour = "white"))
+p
+```
+ This is not relevant for this case
+```{r}
+df1 <- data.table::fread("data/gdp2v.csv") %>% 
+    filter(geo %in% c ("ES30", "ES51", "ES61", "ES52") & 
+           unit %in% c("EUR_HAB_EU27_2020", "PPS_HAB_EU27_2020"))
+
+p <- ggplot()+
+  geom_line(data = df1 , aes(time,obs_value),size = 1, colour = "#AF4B91")+
+ facet_grid(~geo~unit)
+
+ p <- p + theme(strip.placement = "outside",# not revevant here but for 2 dimensions
+                panel.spacing = unit(1, "lines"))
+
+ p
+```
+ 
+## Scales
+ 
+We define now other elements outside `theme`. This is more likely to require adjustments depending on the data we use.
+
+We can set up a number of default breaks in the axis, the type of unit to display and tweak the limits of the x access
+ 
+```{r}
+library(scales)
+
+df <- data.table::fread("data/gdp2v.csv") %>% 
+    filter(geo %in% c ("ES30", "ES51", "ES61", "ES52") & 
+           unit =="MIO_EUR") 
+
+p <- ggplot()+
+  geom_line(data = df , aes(time,obs_value,colour=geo),size = 1)+
+  scale_color_brewer(palette="Pastel1")+
+  labs(title = "Evolution of GDP in the biggest Spanish regions")+
+  scale_x_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1), expand=c(0,0))+
+  scale_y_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1))
+
+p
+
+
+```
+ 
+
+## Theme regional
+
+Now we can create a theme that we could store as a code snippet and re-use every time we need to do a line chart.
+
+```{r}
+base_colour <- "#14509E"
+library(showtext)
+library(scales)
+## Loading Google fonts (https://fonts.google.com/)
+font_add_google("Roboto", "roboto")
+
+
+showtext_auto()
+
+theme_regacc_line <- theme_minimal (base_size = 18, 
+                                    base_family = "roboto")+
+                     theme(plot.background = element_rect(fill= "white", 
+                                       colour = base_colour),
+                           panel.background = element_rect(fill= "#FAFAFA", 
+                                              colour = base_colour),
+                           panel.grid.major.y = element_line(colour=base_colour, 
+                                                             linetype = "dotted"),
+                           axis.line.x = element_line(colour=base_colour, 
+                                           size =rel(1.2)),
+                           axis.line.y = element_line(colour= base_colour, 
+                                           size= rel(1.2)),
+                           axis.text.x = element_text(colour=base_colour, 
+                                                      size =rel (1.1)),
+                           axis.text.y= element_text(colour= base_colour, 
+                                                     size= rel(1.1), 
+                                                     hjust=0),
+                           axis.ticks = element_line(size =rel(1.5),
+                                                     colour = base_colour),
+                           axis.title.x = element_blank(),
+                           axis.title.y = element_text(size = rel(0.9),
+                                          colour=base_colour,
+                                          angle = 0, 
+                                          vjust = 1,
+                                          face = "italic"),
+                           legend.position = "bottom",
+                           legend.title = element_blank(),
+                           legend.key = element_rect(fill= "white",
+                                                     colour = NA,),
+                           legend.background = element_rect(fill="white", 
+                                                            colour = base_colour, 
+                                                            linetype = "solid"),
+                           legend.text = element_text(colour= base_colour),
+                           plot.title = element_text(face= "bold", 
+                                          colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.3), 
+                                          margin = margin(10,0,10,0)),
+                           plot.subtitle = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.1), 
+                                          margin = margin(0,0,10,0)),
+                           plot.caption = element_text(    colour =base_colour, 
+                                          hjust =1,
+                                          size = rel(1.0)),
+                           plot.tag = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.0)),
+                           strip.background = element_rect(fill = base_colour, 
+                                                colour = NA),
+                           strip.text = element_text(face = "bold", 
+                                          size = 18, 
+                                          hjust = 0.2,
+                                          colour = "white"),
+                           strip.placement = "outside",
+                           panel.spacing = unit(1, "lines")
+                     )
+
+ggplot()+
+  geom_line(data = df , aes(time,obs_value,colour=geo),size = 1)+
+  scale_color_brewer(palette="Pastel1")+
+  theme_regacc_line+
+  scale_x_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1), expand=c(0,0))+
+  scale_y_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1))+
+  labs(title = "Evolution of GDP in the biggest Spanish regions",
+       subtitle = " In Millions of Euros",
+       caption = "Source: Eurostat")
+```
+It is easy to change the appearance of the graph. We could modify the base colour.
+
+```{r}
+base_colour <-"#AF4B91"
+
+theme_regacc_line <- theme_minimal (base_size = 18, 
+                                    base_family = "roboto")+
+                     theme(plot.background = element_rect(fill= "white", 
+                                       colour = base_colour),
+                           panel.background = element_rect(fill= "#FAFAFA", 
+                                              colour = base_colour),
+                           panel.grid.major.y = element_line(colour=base_colour, 
+                                                             linetype = "dotted"),
+                           axis.line.x = element_line(colour=base_colour, 
+                                           size =rel(1.2)),
+                           axis.line.y = element_line(colour= base_colour, 
+                                           size= rel(1.2)),
+                           axis.text.x = element_text(colour=base_colour, 
+                                                      size =rel (1.1)),
+                           axis.text.y= element_text(colour= base_colour, 
+                                                     size= rel(1.1), 
+                                                     hjust=0),
+                           axis.ticks = element_line(size =rel(1.5),
+                                                     colour = base_colour),
+                           axis.title.x = element_blank(),
+                           axis.title.y = element_text(size = rel(0.9),
+                                          colour=base_colour,
+                                          angle = 0, 
+                                          vjust = 1,
+                                          face = "italic"),
+                           legend.position = "bottom",
+                           legend.title = element_blank(),
+                           legend.key = element_rect(fill= "white",
+                                                     colour = NA),
+                           legend.background = element_rect(fill="white", 
+                                                            colour = base_colour, 
+                                                            linetype = "solid"),
+                           legend.text = element_text(colour= base_colour),
+                           plot.title = element_text(face= "bold", 
+                                          colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.3), 
+                                          margin = margin(10,0,10,0)),
+                           plot.subtitle = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.1), 
+                                          margin = margin(0,0,10,0)),
+                           plot.caption = element_text(    colour =base_colour, 
+                                          hjust =1,
+                                          size = rel(1.0)),
+                           plot.tag = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.0)),
+                           strip.background = element_rect(fill = base_colour, 
+                                                colour = NA),
+                           strip.text = element_text(face = "bold", 
+                                          size = 18, 
+                                          hjust = 0.2,
+                                          colour = "white"),
+                           strip.placement = "outside",
+                           panel.spacing = unit(1, "lines")
+                     )
+
+ggplot()+
+  geom_line(data = df , aes(time,obs_value,colour=geo),size = 1)+
+  scale_color_brewer(palette="Pastel1")+
+  theme_regacc_line+
+  scale_x_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1), expand=c(0,0))+
+  scale_y_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1))
+```
+Now it is relative easy to create another theme for other kind of plots.
+```{r}
+
+base_colour <- "#14509E"
+
+theme_regacc_dotplot <- theme_minimal (base_size = 18, 
+                                    base_family = "roboto")+
+                     theme(plot.background = element_rect(fill= "white", 
+                                       colour = base_colour),
+                           panel.background = element_rect(fill= "#FAFAFA", 
+                                              colour = base_colour),
+                           panel.grid.major.x = element_line(colour=base_colour, 
+                                                             linetype = "dotted"),
+                           axis.line.x = element_line(colour=base_colour, 
+                                           size =rel(1.2)),
+                           axis.line.y = element_line(colour= base_colour, 
+                                           size= rel(1.2)),
+                           axis.text.x = element_text(colour=base_colour, 
+                                                      size =rel (1.1)),
+                           axis.text.y= element_text(colour= base_colour, 
+                                                     size= rel(1.1), 
+                                                     hjust=0),
+                           axis.ticks = element_line(size =rel(1.5),
+                                                     colour = base_colour),
+                            axis.title.x = element_text(size = rel(0.9),
+                                          colour=base_colour,
+                                          angle = 0, 
+                                          vjust = 0.5,
+                                          face = "italic"),
+                           legend.position = "bottom",
+                           legend.title = element_blank(),
+                           legend.key = element_rect(fill= "white", 
+                                                     colour = NA),
+                           legend.background = element_rect(fill="white", 
+                                                            colour = NA, 
+                                                            linetype = "solid"),
+                           legend.text = element_text(colour= base_colour),
+                           plot.title = element_text(face= "bold", 
+                                          colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.3), 
+                                          margin = margin(10,0,10,0)),
+                           plot.subtitle = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.1), 
+                                          margin = margin(0,0,10,0)),
+                           plot.caption = element_text(    colour =base_colour, 
+                                          hjust =1,
+                                          size = rel(1.0)),
+                           plot.tag = element_text(    colour =base_colour, 
+                                          hjust =0,
+                                          size = rel(1.0)),
+                           strip.background = element_rect(fill = base_colour, 
+                                                colour = NA),
+                           strip.text = element_text(face = "bold", 
+                                          size = 18, 
+                                          hjust = 0.2,
+                                          colour = "white"),
+                           strip.placement = "outside",
+                           panel.spacing = unit(1, "lines")
+                     )
+
+ggplot()+
+  geom_point(data = df1 %>% filter(unit =="EUR_HAB_EU27_2020") , aes(obs_value,fct_reorder(geo,obs_value), colour = geo),size = 3)+
+  theme_regacc_dotplot+
+  scale_x_continuous(breaks = pretty_breaks(n=4), labels = label_number(accuracy = 1), expand = expansion(add = 1))+
+  labs(title = "Evolution of GDP in the biggest Spanish regions",
+       subtitle = " In Euro per capita as % of the EU",
+       caption = "Source: Eurostat",
+       x="", 
+       y = "")
+
+```
+

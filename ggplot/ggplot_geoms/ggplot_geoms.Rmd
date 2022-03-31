@@ -1,0 +1,245 @@
+---
+title: "Overview of ggplot geoms and extensions"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  fig.height = 12,
+  fig.width = 15
+)
+```
+
+We will go through some examples of the charts we can make with ggplot. We will start with a basic chart and add some nice features usually not easily available in Excel.
+
+## geom_line
+
+```{r}
+library(tidyverse)
+source("utils.R")
+df <- data.table::fread("data/gdp2v.csv") %>% 
+  mutate( country = str_sub(geo,1,2),
+          NUTS = str_length(geo)-2) %>% 
+  filter(country == "AT" & NUTS == "2" & unit == "PPS_HAB_EU27_2020")
+
+```
+
+A simple one with no colours.
+
+```{r}
+p <- ggplot(df, aes(time, obs_value, group = geo))+
+  geom_line(colour = luis_cols("theme2"), size = 1)+
+  theme_light()+
+  labs(y = "EU=100",
+       x="",
+       title = "GDP per capita of Austrian regions",
+      subtitle =  "In PPS, as percentage of EU average")
+p
+```
+
+A simple one with colours.
+
+```{r}
+p <- ggplot(df, aes(time, obs_value, colour = geo))+
+  geom_line(size = 1)+
+  scale_colour_luis()+
+  theme_light()+
+  labs(y = "EU=100",
+       x="",
+       title = "GDP per capita of Austrian regions",
+      subtitle =  "In PPS, as percentage of EU average")
+p
+```
+
+## geom_hline
+
+Let's use `geom_hline` and take out the extra space from the axes.
+
+```{r}
+p<- p + geom_hline(yintercept = 100,
+                   color = "black")+
+  scale_x_continuous(expand = c(0,0),
+                     limits = c(2000, 2021),#make space for labels later
+                     breaks = seq(2000, 2015, by = 5))
+p
+```
+
+## {ggreppel}
+
+There are too many lines to identify them well by colour. Another possibility is to use direct labels with `{ggrepel}`.
+
+```{r}
+library(ggrepel)
+p <- p +   geom_text_repel(data= df %>% filter(time == 2019),# take last year only
+    aes(label = geo),
+    size = 6,
+    direction = "y",
+    hjust = 0, 
+    segment.size = 0.2,
+     xlim = c(2019, 2021),
+    segment.size = .4,
+    segment.alpha = .5,
+    segment.linetype = "dotted",
+    box.padding = .4,
+    segment.curvature = -0.1,
+    segment.ncp = 3,
+    segment.angle = 20
+  )+
+  theme(legend.position = "none")
+p
+```
+Another option (hacky) is to create a second data frame with just the last values and add a secondary axis.
+
+```{r}
+df_filtered <- df %>% 
+  filter(time== 2019)
+
+ggplot(df, aes(time, obs_value, colour = geo))+
+  geom_line(size = 1)+
+  scale_colour_luis()+
+  scale_y_continuous(sec.axis = dup_axis(breaks = df_filtered$obs_value,
+                                         labels = df_filtered$geo,
+                                         name =""))+
+  scale_x_continuous(expand=c(0,0)) +
+  theme_light()+
+  theme(legend.position ="none")+
+  labs(y = "EU=100",
+       x="",
+       title = "GDP per capita of Austrian regions",
+      subtitle =  "In PPS, as percentage of EU average")
+
+```
+
+## {gghighlight}
+
+If we have too many lines it would be better to plot the data using facets and using `{gghightlight}`.
+
+```{r}
+library(gghighlight)
+
+df <- data.table::fread("data/gdp2v.csv") %>% 
+  mutate( country = str_sub(geo,1,2),
+          NUTS = str_length(geo)-2) %>% 
+  filter(country == "ES" & NUTS == "2" & unit == "PPS_HAB_EU27_2020")
+
+ggplot( df, aes(x=time, y=obs_value,group = geo)) +
+    geom_line(size = 1, colour = luis_cols("theme2")) +
+    gghighlight(use_direct_label = FALSE)+
+  geom_hline(yintercept = 100,
+                   color = "black")+
+  facet_wrap(~geo)+
+  theme_light()+
+    labs(y = "EU=100",
+         x="",
+       title = "GDP per capita of Spanish regions",
+      subtitle =  "In PPS, as percentage of EU average")
+```
+
+## geom_rect
+
+This could be a nice addition to shade some periods. For example when Spain converged.
+
+```{r}
+df <- data.table::fread("data/gdp2v.csv") %>% 
+  filter(geo == "ES" & unit == "PPS_HAB_EU27_2020")
+
+
+ggplot( df, aes(x=time, y=obs_value)) +
+ geom_rect(aes(xmin=2000, xmax=2006, ymin=-Inf, ymax=+Inf), fill="#CCCCCC", alpha = 0.3)+
+ geom_rect(aes(xmin=2014, xmax=2017, ymin=-Inf, ymax=+Inf), fill="#CCCCCC", alpha = 0.3)+
+  geom_line(colour = luis_cols("theme2"))+
+  theme_light()+
+    labs(y = "EU=100",
+         x="",
+       title = "GDP per capita of Spain",
+      subtitle =  "In PPS, as percentage of EU average")
+  
+```
+
+## geom segment
+
+It would be nicer to remove horizontal grid lines and add them later manually with `{geom_segment}`.
+
+```{r}
+ggplot( df, aes(x=time, y=obs_value)) +
+ geom_rect(aes(xmin=2000, xmax=2006, ymin=-Inf, ymax=+Inf), fill="#CCCCCC", alpha = 0.3)+
+ geom_rect(aes(xmin=2014, xmax=2017, ymin=-Inf, ymax=+Inf), fill="#CCCCCC", alpha = 0.3)+
+  geom_line(colour = luis_cols("theme2"), size = 1)+
+    labs(y = "EU=100",
+       title = "GDP per capita of Spain",
+      subtitle =  "In PPS, as percentage of EU average")+
+  theme_light()+
+    theme(panel.grid = element_blank(),
+          panel.background = element_blank())+
+ geom_segment(
+    data = tibble(y = seq(90, 105, by = 5), x1 = 2000, x2 = 2019),
+    aes(x = x1, xend = x2, y = y, yend = y),
+    #inherit.aes = FALSE,
+    color = "grey70",
+    size = .6,
+    )+
+geom_segment(
+    data = tibble(y1 = 90, y2 = 105, x =seq(2000,2019, by = 5)),
+    aes(x = x, xend = x, y = y1, yend = y2),
+    #inherit.aes = FALSE,
+    color = "grey70", 
+    size = .6
+    )+
+    scale_x_continuous(expand=c(0,0))
+
+```
+
+## geom_ribbon and `{ggh4x}`
+
+We can plot the are between a line and the axis lines.
+
+```{r}
+
+df <- data.table::fread("data/gdp2v.csv") %>% 
+  filter(geo %in% c("ES") & unit == "PPS_HAB_EU27_2020")
+
+
+ggplot( df, aes(x=time, y=obs_value)) +
+  geom_line(size = 2,colour = luis_cols("theme2"))+
+  geom_ribbon(aes(ymin = 0 , ymax = obs_value), fill = luis_cols("theme1"),)+
+  theme_light()
+
+```
+
+A nicer feature is to colour the are between two lines with `{ggh4x}`. We need to re-arrange the dataset to wider.
+
+```{r}
+
+df <- data.table::fread("data/gdp2v.csv") %>% 
+  filter(geo %in% c("ES", "ES63") & unit == "PPS_HAB_EU27_2020") %>% 
+  pivot_wider(names_from = geo,
+        values_from = obs_value)
+  
+
+ggplot(df,aes(x=time)) +
+  geom_line(aes(y = ES), size =2, colour = luis_cols("theme1"))+
+  geom_line(aes(y = ES63), size=2, colour = luis_cols("theme3"))+
+  geom_ribbon(aes(ymin = ES63 , ymax = ES), fill = luis_cols("theme2"))+
+  theme_light()+
+  labs(x="",
+       y="",
+       colour ="Geo")+
+    scale_color_manual(breaks=c('Spain', 'Andalucía'),
+                     values=c('Spain'=luis_cols("theme1"), 'Andalucia'=luis_cols("theme3")))+
+  theme(legend.position = "bottom")
+
+```
+
+
+```{r}
+
+```
+

@@ -1,0 +1,508 @@
+---
+title: "{ggplot2}"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  fig.height = 9,
+  fig.width = 12
+)
+```
+
+`{ggplot2}` builds complex plots using layers. For building a ggplot we only need two functions, but first a dataset!
+
+```{r}
+library(tidyverse)
+
+df<- data.table::fread("data/gdp2v.csv") %>% 
+  filter(unit=="PPS_HAB_EU27_2020") %>% 
+  mutate(country=str_sub(geo,1,2),
+         NUTS=str_length(geo)-2) %>% 
+  filter(NUTS=="2" & country =="ES") %>% 
+  select(-obs_decimals,-obs_status, -unit,-NUTS) %>% 
+  filter(time == 2000 | time == 2019) %>% 
+  select(geo,time,obs_value) %>% 
+  pivot_wider(names_from=time,
+              values_from=obs_value,
+              names_prefix = "y")
+```
+
+# ggplot 
+
++ The ggplot function specifies the dataset we want to use (`data`).
++ The mapping of the variables to the aesthetic (`aes`)
+
+```{r,fig.cap="Map variables"}
+ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))
+```
+
+We have an empty chart with the information we have provided: the data to use and what is in the x and y axis. The x and y axis are scaled to our dataset and we have the name of the variables in the axis.
+
+# geom_
+
+Now we have to tell `ggplot` which `geom` to use for showing the observations (lines, dots, areas,etc). The `geom` we choose will depend partially on the kind of data we have and what we want to display. They are added using functions that start with `geom_` and functions are chained with a `+`. In this case, we add a point with `geom_point` which will produce a scater plot
+
+## geom_point
+
+```{r,fig.cap="Add geom point"}
+ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point()
+```
+
+We can easily change these parameters to obtain other kind of charts. 
+
+## geom_col
+
+```{r,fig.cap="Add geom point"}
+ggplot(data = df,
+       mapping = aes(y=geo, x= y2019))+
+  geom_col()
+```
+
+It is very easy to convert it to a horizontal bar chart just changing the axis.
+
+```{r,fig.cap="Add geom point"}
+ggplot(data = df,
+       mapping = aes(x=geo, y= y2019))+
+  geom_col()
+```
+
+Sometimes it will involve changing the dataset we pass to ggplot (long or wide format)
+
+```{r,fig.cap="Add geom point"}
+df_long<- df %>% 
+  pivot_longer(cols=c(y2000, y2019),
+               names_to = "time",
+               values_to = "values")
+
+ggplot(data = df_long,
+       mapping = aes(x=geo, y= values, fill=time))+
+  geom_col(position ="dodge")
+```
+
+```{r, fig.cap="change mapping and geo"}
+ggplot(data = df,
+       mapping = aes(x= fct_reorder(geo,-y2019), y= y2019))+
+  geom_col()
+
+```
+
+Here we reorder the observations with `{fct_reorder}`.
+
+The `geom_` can include several aesthetics options (alpha, colour, fill, group, shape, size, etc).
+
+```{r, fig.cap="Change geom aesthetics"}
+ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point(alpha=1/3,
+             colour="red",
+             size=3)
+```
+
+We can have more than one geom in a chart. We can add a regression line with `{geom_smooth}`.
+
+```{r, fig.cap="Add geom_smooth"}
+ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point(alpha=1/3,
+             colour="red",
+             size=3)+
+  geom_smooth(method = "lm")
+```
+
+The chart indicates that there is a positive correlation between the values in 2000 and 2019 and that some regions are slightly outside the expected values of the regression.
+
+# Groupings
+
+In addition to mapping variables to the axes, they can also be mapped to characteristics. Let's create the variable **nuts 1** in the data.frame and map it to colour. We will have to remove the fixed mapping of colour inside `{geom}` and put it on the `{aes}`.
+
+```{r, fig.cap="Add colour mapping"}
+df<- df %>% 
+  mutate(nuts1=str_sub(geo,1,3))
+
+ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019, colour= nuts1))+
+  geom_point(alpha=2/3,
+             #colour="red",
+             size=3)+
+  geom_smooth(method = "lm",
+              se = FALSE)
+
+```
+
+Notice some things in this chart. All the `{geoms}` are automatically adjusted to the new `{aes}` mapping. We have also a new legend explaining the mapping.
+
+We could also map the size to the values in millions of euros, for example.
+
+We could prefer to have the colour only in the points but have a single regression line. In general, `{geoms}` inherit the `{aes}` from the first ggplot function but we can use different ones if we specify individually the `{aes}` for each `{geom}`.
+
+```{r, fig.cap="Individual mappings for geom"}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019, 
+                           colour = nuts1),
+                           alpha=2/3,
+                           size=3)+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")
+
+```
+
+# Scales
+
+`scales_` functions allow to change the mapping between the variables and the axes, colours or any other characteristic we have mapped. Let's change the axis to a logarithmic scale and the colour mappings using a set of colours that we define manually.
+
+```{r, fig.cap="scales"}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019, 
+                           colour = nuts1),
+                           alpha=2/3,
+                           size=3)+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")+
+  scale_x_log10()+
+  scale_y_log10()+
+  scale_color_manual(values = c( "#738CFF",
+                                  "#9140FF",
+                                  "#FFB300",
+                                  "#26CCFF",
+                                  "#5FED00",
+                                  "#CC0029",
+                                  "#847A77"))
+  
+
+```
+
+## Facets
+
+We could use also small graphs to get the view for nuts1 regions grouping instead of colours.
+
+```{r, fig.cap="facets"}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019),
+                           alpha=2/3,
+                           size=3,
+                           colour="red")+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")+
+  facet_wrap(~nuts1)
+
+```
+
+## Labels
+
+The `labs` function provides customized labels for the axes,legends, title, etc.
+
+```{r, fig.cap="labs"}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019),
+                           alpha=2/3,
+                           size=3,
+                           colour="red")+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")+
+  facet_wrap(~nuts1)+
+ labs(title = "GDP per capita of Spanish NUTS 1 regions, 2000 and 2019",
+       subtitle = "As % of EU 27 average in PPS",
+       caption = "source: Eurostat",
+       x = " Year 2000",
+       y = "Year 2019")
+```
+
+## Themes
+
+`theme_` functions change the appearance of some none data related elements of the charts, like gridlines, background colours, placement of the legend.
+
+```{r}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019),
+                           alpha=2/3,
+                           size=3,
+                           colour="red")+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")+
+  facet_wrap(~nuts1)+
+ labs(title = "GDP per capita of Spanish NUTS 1 regions, 2000 and 2019",
+       subtitle = "As % of EU 27 average in PPS",
+       caption = "source: Eurostat",
+       x = " Year 2000",
+       y = "Year 2019")+
+  theme_bw()
+
+```
+
+##  Using more than 1 dataset
+
+Normally we could prepare exactly the data we want to use for ggplot, but we can also use different datasets for different geoms.
+
+```{r, Using two dataframes}
+df_it<- data.table::fread("data/gdp2v.csv") %>% 
+  filter(unit=="PPS_HAB_EU27_2020") %>% 
+  filter(time == 2000 | time == 2019) %>% 
+  mutate(country=str_sub(geo,1,2),
+         nuts=str_length(geo)-2) %>% 
+  filter(country=="IT" &
+         nuts==2) %>% 
+  select(geo,time,obs_value) %>% 
+  pivot_wider(names_from=time,
+              values_from=obs_value,
+              names_prefix = "y") %>% 
+   mutate(nuts1=str_sub(geo,1,3))
+
+# little hack here
+colors <- c("Spain" = "red", "Italy" = "blue")
+
+ggplot()+
+  geom_point(data=df, aes(x=y2000,
+                          y=y2019,
+                          colour= "Spain"),
+                          size=3)+
+  geom_point(data=df_it, aes(x=y2000,
+                          y=y2019,
+                          colour= "Italy"),
+                          size=3)+
+  scale_colour_manual(values=colors)+
+  labs(colour="Country")+
+  theme_light()
+
+```
+
+## Graphs as objects
+
+ggplot charts can be assigned and saved as objects. We could save the object and then modify it.
+
+```{r}
+p <- ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point()
+
+p <- p + labs(title="First chart")
+
+p$data
+p$mapping
+p$labels
+```
+
+Saving p as an Rdata file will save the data used for the graphs and all the parameters. 
+
+# Customisizing charts
+
+## Axes
+
+We can customise numeric axis with `scale_*_continuous` and set the breaks and limits for example.
+
+```{r, fig.cap= "Customised numerical x axis limits"}
+ ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point()+
+  scale_x_continuous(limits=c(80,100))
+```
+
+We can format the numeric labels with the `scales`package.
+
+```{r, fig.cap= "Customised numeric axis labels"}
+df %>% 
+  mutate(y2000=y2000/100,
+         y2019=y2019/100) %>% 
+ ggplot(mapping = aes(x= y2000, y= y2019))+
+  geom_point(size=3)+
+ scale_x_continuous(labels= scales::percent) 
+```
+
+See that ggplot is also pipeable and the .data argument can be brought directly from the data frame.
+
+Discrete axis are modified with `scale_*_discrete`.
+
+```{r, fig.cap= "Customised x axis"}
+ggplot(data = df,
+       mapping = aes(x= geo, y= y2019))+
+  geom_col()+
+  scale_x_discrete(limits=c("ES30","ES12","ES51"),
+                   labels= c("Center", "North", "South"))
+```
+
+Date axis are modified with `scale_*_date`. It is useful to know some abreviations for the argument `date_labels`:
+
++ %d	day as a number (0-31)	
++ %a	abbreviated weekday	
++ %A	unabbreviated weekday	
++ %m	month (00-12)
++ %b	abbreviated month
++ %B	unabbreviated month
++ %y	2-digit year
++ %Y	4-digit year
+
+## Colours
+
+We can manually specify individual colours in the `geom_*` with `colour =` or several colours with `scale_colour_manual` (or fill) but we have to provide the precise amount of colours needed. We can also let ggplot choose them for us or one of the available predefined colour palettes. 
+
+Some popular ones are `RColorBrewer` using `scale_color_brewer()`.
+
+```{r}
+RColorBrewer::display.brewer.all()
+```
+
+or viridis, which has several options (scale_colour_viridis_c, scale_colour_viridis_d) and does not limit the amount of colours.
+
+```{r}
+library(viridis)
+scales::show_col(viridis_pal()(30))
+```
+
+the library **{paletteer}** includes hundreds of palettes. You can use it in ggplot with   `scale_color_paletteer_d("package::palette")` (or fill) or get the HEX codes of the palette with the function paletteer_d(), for example the colours of the palette `Grand Budapest` from the package `Wes Anderson`.
+
+```{r}
+library(wesanderson)
+paletteer::paletteer_d("wesanderson::GrandBudapest1")
+```
+
+```{r}
+ggplot(data = df,
+       mapping = aes(x= geo, y= y2019, fill= geo))+
+  geom_col()+
+  scale_x_discrete(limits=c("ES30","ES12","ES51"),
+                   labels= c("Center", "North", "South"))+
+  paletteer::scale_fill_paletteer_d("wesanderson::GrandBudapest1")
+
+```
+
+## Points
+
+We can change the usual points by different shapes or set the shape as a grouping argument.
+
+```{r}
+ ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point(shape= 3, size=5)
+```
+
+## Lines
+
+For lines we can change the size and the linetype.
+
+## Fonts
+
+We can apply the font using the `text` option in the theme `function`. We can also control the size of the font. 
+
+```{r}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019),
+                           alpha=2/3,
+                           size=3,
+                           colour="red")+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019),
+                            method = "lm",
+                            se = FALSE,
+                            colour = "steelblue")+
+  facet_wrap(~nuts1)+
+ labs(title = "GDP per capita of Spanish NUTS 1 regions, 2000 and 2019",
+       subtitle = "As % of EU 27 average in PPS",
+       caption = "source: Eurostat",
+       x = " Year 2000",
+       y = "Year 2019")+
+theme(plot.title = element_text(family = "mono",face="bold", colour="steelblue"),
+      plot.subtitle = element_text(family = "serif",face="italic", colour="darkred"))
+```
+
+## Legends
+
+Legends are automatically created when we map one variable to an element. We can change the legend position with `theme(legend.position = position)` which takes as arguments "bottom", "left" or "none"if we do not want to include it but also coordinates that vary from 0 to 1 `c(x,y)`.
+
+```{r}
+ggplot(data = df)+
+  geom_point(mapping = aes(x = y2000, 
+                           y = y2019,
+                           colour=nuts1),
+                           alpha=2/3,
+                           size=3)+
+  geom_smooth(mapping = aes(x = y2000, 
+                            y = y2019,
+                            colour = nuts1),
+                            method = "lm",
+                            se = FALSE)+
+ labs(title = "GDP per capita of Spanish NUTS 1 regions, 2000 and 2019",
+       subtitle = "As % of EU 27 average in PPS",
+       caption = "source: Eurostat",
+       x = " Year 2000",
+       y = "Year 2019")+
+  theme_bw()+
+  theme(legend.position = "bottom")
+  
+```
+
+The legend title and some of attributes (colour, size, etc) can be changes in the `labs` function while others in `theme`, like `legend.title.align`.
+
+## Labels
+
+In the labs we can specify the labels of the title, sub-title, caption, of the axis, and the aesthetics we have used in the chart (colour, size, etc).
+
+## Text
+
+We can add directly text to the values with `geom_text` and `geom_label`.
+
+```{r}
+ ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019, label= geo))+
+  geom_text()
+
+ ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019, label= geo))+
+  geom_label()
+```
+
+
+Sometimes we may only want to annotate something in the chart with `annotate`.
+
+```{r}
+ ggplot(data = df,
+       mapping = aes(x= y2000, y= y2019))+
+  geom_point(size=4, colour="red")+
+  annotate("text", 
+           x=124, 
+           y=127, 
+           label="Madrid is the capital region",
+           colour="blue")
+```
+
+We can also use annotate with "rect" or other elements.
+
+## Adding lines
+
+We can add horizontal and vertical lines with `geom_hline()` and `geom_vline()`. It is also possible to add arrows with `geom_segment()` and `geom_curve()`.
+
+## Themes
+
+Ggplot comes with a few pre-built themes for most elements that are controlled in theme. Additional popular ones are available in **{ggthemes}** or **{hrbrthemes}**.
+

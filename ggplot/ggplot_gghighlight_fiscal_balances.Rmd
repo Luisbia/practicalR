@@ -1,0 +1,111 @@
+---
+title: "Balanzas fiscales de las regiones españolas"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+Voy a usar estas librerías:
+
+```{r libraries}
+library(tidyverse)
+library(dataregacc) # available with remotes::install_github("Luisbia/dataregacc")
+library(gghighlight)
+```
+
+
+Cojo los datos de aquí y hago los cálculos de las balanzas de los hogares. SOn unas balanzas atípicas comparadas con las "famosas" balanzas fiscales. Hay que aclarar que los impuestos indirectos (IVA por ejemplo) no están incluidos porque en Cuentas Nacionales se consideran que son otros sectores los que los pagan.
+```{r data}
+data <- regacc %>%
+  filter(table == "2hh" &
+    country == "ES" &
+    NUTS %in% c(0, 2) &
+    unit == "MIO_EUR" &
+    na_item %in% c("D5", "D61", "D62", "D63", "D7") &
+    label != "Extra-regio") %>%
+  select(-country, -table, -flag, -nace_r2, -unit) %>%
+  unite(na_item, c(na_item, acc)) %>%
+  pivot_wider(
+    names_from = na_item,
+    values_from = values
+  ) %>%
+  mutate(
+    pagos = D5_PAID + D61_PAID + D7_PAID,
+    ingresos = D62_RECV + D63_RECV + D7_RECV,
+    neto = ingresos - pagos
+  ) %>%
+  select(geo, label, time, neto)
+```
+
+Uso los datos de población.
+
+```{r data_pop}
+data_pop <- regacc %>%
+  filter(table == "3pop" &
+    country == "ES" &
+    NUTS %in% c(0, 2)) %>%
+  select(geo, time, values) %>%
+  rename(pop = values)
+```
+
+Y los fusiono.
+
+```{r merge}
+data <- left_join(data, data_pop) %>%
+  mutate(neto_pop = round(neto * 1000 / pop)) %>%
+  select(geo, label, time, neto_pop)
+```
+
+El gráfico.
+
+```{r chart, fig.height=9, fig.width=12}
+
+chart<- ggplot() +
+  geom_line(data= data %>% filter(label!="Spain"), aes(time, neto_pop, group = label),size = 1.2, colour = "#14509E") +
+  geom_line(data= data %>% filter(label == "Spain"), aes(time, neto_pop, group = label),size = 1.5, colour = "darkred") +
+  gghighlight(use_direct_label = FALSE) +
+  facet_wrap(~label) +
+  ylab("Euros per capita")+
+  theme_light()+
+theme(plot.background = element_rect(fill= "#FFFFFF", #panel background
+                                       colour = "black"),# border lines
+        line = element_line(colour = "black"), 
+        rect = element_rect(fill = "#FAFAFA", 
+                            linetype = 0, 
+                            colour = NA),
+        panel.background = element_rect(fill= "#FAFAFA"),#background inside axis
+        axis.title.x = element_blank(), #axis titles
+        axis.title.y = element_text(colour = "#14509E"),
+        axis.line.x = element_line(colour = "#14509E" ),#line of axis
+        axis.line.y = element_line(colour = "#14509E"),
+        axis.text.y = element_text(colour = "#14509E"),
+        axis.text.x = element_text(colour = "#14509E"),
+        axis.ticks = element_line(size =rel(1.1),colour = "#14509E"),
+        panel.grid.major.y = element_line(colour="#14509E"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.title = element_blank(), # remove legend title   
+        legend.position = "none",
+        legend.key = element_rect(fill="white"),
+        legend.background = element_rect(fill="white", colour = "#14509E", linetype = "solid"),#background colour legend
+        plot.title = element_text(face= "bold", colour ="#14509E", hjust =0,size = rel(1.3), margin = margin(10,0,10,0)),
+      plot.subtitle = element_text(face= "italic", colour ="#14509E", hjust =0,size = rel(1.1), margin = margin(10,0,10,0)),
+      plot.caption = element_text( colour ="#14509E", hjust =0.5),
+        strip.background = element_rect(fill = "#14509E", colour = NA),
+        strip.text.x = element_text(face = "bold",  size = rel (1.1), hjust = 0.1, colour = "white" ), #margin = margin() 
+        strip.text.y = element_text(face = "bold", size = rel (1.1),hjust = 0.1,  colour = "white"),
+        strip.placement = "outside",
+        panel.spacing = unit(0.8, "lines"))+
+  labs(title = "Balanzas Netas* per capita de las Cuentas Económicas de los Hogares",
+       subtitle = "* D62_RECV + D63_RECV + D7_RECV - (D5_PAID + D61_PAID + D7_PAID)",
+       caption = "Source: Luis Biedma using data from Eurostat")
+
+chart
+```

@@ -1,0 +1,223 @@
+---
+title: "File and folder operations"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+
+
+ 
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = FALSE,
+                      message= FALSE,
+                      warning= FALSE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+## Copying a complete folder
+
+We can easily copy a complete folder with its sub-folders with `file.copy`. 
+
+```{r, eval =FALSE}
+file.copy("U:/03_Regional Accounts/03D_Data Production/2021/ES",
+          "data/", # you must have a folder named data
+          recursive =TRUE)
+```
+
+But that would mean in many occasions to bring unwanted files. We will see later how to target more closely what we want to bring.
+
+```{r include=FALSE}
+unlink("data/ES", recursive = TRUE)
+```
+
+
+## Creating and deleting folders
+
+We can create folders in which we store only the files we want to bring with `dir.create`.
+
+
+```{r}
+country<- c("DE")
+dir.create(paste0("data/", country))
+```
+
+And check if a folder exists.
+```{r}
+dir.exists(paste0("data/", country))
+```
+
+And delete a folder.
+```{r}
+unlink(paste0("data/", country), recursive = TRUE)
+```
+
+We can iterate through a function to create several folders. If the folder already exists we will get an error.
+
+```{r}
+countries<- c("DE","FR","IT")
+
+create_country_folder <- function (x) {
+  dir.create(paste0("data/", x))  
+} 
+
+```
+
+```{r}
+map(countries,create_country_folder)
+
+unlink(paste0("data/", countries), recursive = TRUE)# cleaning
+```
+
+## Copying individual files
+
+The best approach is to copy the files we want instead of working on the original ones. Let's bring all the first version of t1001 files from the server to our local folder. 
+
+```{r}
+files_to_copy <- list.files("U:/03_Regional Accounts/03D_Data Production/2021",
+           full.names = TRUE,
+           recursive = TRUE,
+           pattern = (glob2rx("t1001_*_01.xlsx")))
+
+head(files_to_copy)
+```
+
+It is **very important** to add `copy.date = TRUE` in order to keep the original date of the file (if we plan to use that later). Otherwise the date of the file will be the moment it was copied.
+
+```{r, eval =FALSE}
+file.copy(files_to_copy,
+          "data",
+          overwrite = FALSE,
+          copy.date = TRUE)
+```
+
+## Getting information from the files
+
+We can use `file.info` to know more about the files we have copied or that we have available in our folder (for example, pick the most recent one). **Do not forget** to set full.names = TRUE.
+
+```{r}
+files<- list.files("data",
+           full.names = TRUE) %>% 
+  file.info()
+
+head(files)
+```
+
+This creates a data frame with the path of the files as `rownames`. We can convert them in a column
+
+```{r}
+files$path <-rownames(files)
+row.names(files) <- NULL
+
+head(files)
+```
+
+Another approach (which I use by default) is to convert the listed files into a tibble.
+
+```{r}
+files<- list.files("data",
+           full.names = TRUE) %>%
+  as_tibble() 
+
+head(files)
+```
+
+This creates a column named value in which we can apply `file.info` with `mutate` and `map`.
+
+```{r}
+files<- files %>% 
+mutate(info=map(value,file.info))
+```
+
+This creates a nested tibble or list-column
+
+```{r}
+files[[2]][[1]]
+```
+
+Which we can `unnest`.
+
+```{r}
+files <- files %>% 
+  unnest (cols = c(info))
+
+head(files)
+```
+
+We keep only some columns.
+
+```{r}
+files <- files %>% 
+  select(value,size,mtime)
+
+head(files)
+```
+
+And now we can filter, sort..etc with the usual verbs.
+
+## A practical example: Monitoring a Regacc production
+
+We might want to know how many files where transmitted in the 2021 production round.
+
+```{r}
+files<- list.files("U:/03_Regional Accounts/03D_Data Production/2021",
+                   pattern ="*.xml$",
+                  recursive=TRUE,
+                  full.names = TRUE)
+
+cat(prettyNum(length(files), big.mark = " "))
+```
+
+And how many MBs
+```{r}
+ vect_size <- sapply(files, file.size)
+ size_files <- sum(vect_size)
+ cat(prettyNum(round(size_files/10**6),big.mark = " "))
+```
+
+We can get more detailed information by country and table.
+
+```{r}
+files_df <- files  %>%
+  as_tibble() %>%
+  mutate(
+    geo = str_sub(value, start = -22, end = -21),
+    table = str_sub(value, start = -29, end = -26)
+  )
+
+slice_sample(files_df, n=5)
+```
+
+And when they were transmitted (first and last) to fill in the NQR.
+
+```{r}
+NQR <- files_df %>%
+  mutate(date = map(value, file.info)) %>%
+  unnest(date) %>%
+  select(geo, table, mtime) %>%
+  group_by(geo, table) %>%
+  filter(table %in% c("1001", "1002","1200", "1300")) %>% 
+  mutate(mtime = lubridate::ymd_hms(mtime)) %>%
+  filter(mtime > "2021-09-01") %>%
+  mutate(first_transmission = min(mtime),
+    last_transmission = max(mtime)) %>%
+  mutate(day=substr(first_transmission,start =9, stop=10),
+         month=substr(first_transmission,start =6, stop=7),
+         year=substr(first_transmission,start =1, stop=4)) %>%
+  unite(first, c("day","month","year"),sep="/",remove=TRUE) %>%
+  mutate(day=substr(last_transmission,start =9, stop=10),
+         month=substr(last_transmission,start =6, stop=7),
+         year=substr(last_transmission,start =1, stop=4)) %>%
+  unite(last, c("day","month","year"),sep="/",remove=TRUE) %>%
+  select(geo,table,first,last) %>%
+  distinct()
+
+slice_sample(NQR, n=5)
+```
+
