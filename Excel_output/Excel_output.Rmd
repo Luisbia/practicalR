@@ -1,0 +1,533 @@
+---
+title: "Sending ouput to Excel from R"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Luis Biedma
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+```{r setup, include = FALSE}
+## Global options
+knitr::opts_chunk$set(
+	message = FALSE,
+	warning = FALSE,
+	cache = FALSE,
+	fig.height=9, 
+	fig.width=12
+)
+```
+
+## Introduction 
+
+I will review some features available to send output from R (dataframes) to Excel. We may want to do it because we feel more comfortable filtering or sorting data in excel, because we need to provide the output in excel to end users or as an input to other processes. There is not so much material available, compared to reading excel files. The overview is not exhaustive but restricted to some practical examples which we have handled in Regacc.
+
+## Packages
+
+There are a few packages available but we will  focus on `{writexl}` and `{openxlsx}`. ` {writexls}` is the preferred option for exporting un-formatted data as it is faster and creates smaller files. We will use `{openxlsx}` if we want some customization.
+
+```{r echo=FALSE}
+knitr::write_bib(c("writexl", "openxlsx"), width = 60)
+```
+
+
+## Simple export
+
+Exporting to excel a dataframe. We will use a csv file of eurobase table nama_10r_2gdp as the starting point of the example.
+
+```{r}
+library(tidyverse)
+library(writexl)
+
+df<- rio::import("data/gdp2v.csv") %>% 
+  mutate(country = str_sub(geo,1,2), 
+       NUTS= as.factor(str_length(geo)-2)) %>% 
+  filter(country == "ES" & unit %in% c("EUR_HAB", "PPS_HAB_EU27_2020")) %>% 
+  select(country,geo,NUTS,unit,obs_value) 
+
+writexl::write_xlsx(df, "output/gdp2.xlsx")
+```
+
+## Creating a temporary file
+
+For day to day use we can create an un-named temporary file. The best is to create a function that we can add to our rstudio snippets and call it when needed instead of typing it every time we need to do it. Taken from <https://twitter.com/brodriguesco/status/1447468259725434886>
+
+```{r}
+show_in_excel <- function(.data){
+  tmp <- paste0(tempfile(), ".xlsx")
+  writexl::write_xlsx(.data,tmp)
+  browseURL(tmp)
+}
+
+show_in_excel(df)
+```
+
+## Exporting as an excel table
+
+If we want to avoid having to manually filter the first row in Excel after opening the file for sorting/filtering we can export directly the dataframe as an Excel table.
+
+```{r}
+library(openxlsx)
+
+write.xlsx(df, "output/gdp2.xlsx", overwrite = TRUE, asTable = TRUE)
+```
+
+## Further customisation options
+
+If we want to customise more the output, add a name to the worksheet, table style, font, number format, colours, etc. there are endless possibilities (<https://cran.r-project.org/web/packages/openxlsx/vignettes/Formatting.html>).
+
+```{r}
+wb <- createWorkbook() 
+    modifyBaseFont(wb, fontSize = 12, fontName = "Calibri Light")
+    options(openxlsx.numFmt = "#,##0.00")
+    addWorksheet(wb, "GDP_ES")
+    writeDataTable(wb, "GDP_ES", df, tableStyle = "TableStyleMedium13")
+    
+saveWorkbook(wb,"output/gdp2.xlsx", overwrite = TRUE)
+```
+
+## Modifying an existing file
+
+We can open an existing file and further specify where to place the data, insert plots, etc.
+
+Here we calculate the mean by region and create a chart showing the mean as a bar and the observations as points. We will place the table with the mean in a worksheet called *Summary* on the third row and column and the chart in a Woeksheet named *Chart* with some defined height and width. 
+
+```{r}
+temp<- df %>% 
+  group_by(geo,unit,NUTS) %>% 
+  summarise(avg = round(mean(obs_value, na.rm = TRUE)))
+
+p<- ggplot()+
+  geom_col(data=temp %>% filter(NUTS!=1),aes(avg, reorder(geo,avg), fill= NUTS))+
+  geom_point(data=df%>% filter(NUTS!=1), aes(obs_value,geo))+
+  facet_wrap(~unit, scales = "free_x")+
+  scale_x_continuous(scales::pretty_breaks(n=4), labels = scales::label_number())+
+  ggthemes::theme_fivethirtyeight()+
+  ggthemes::scale_fill_tableau()+
+  theme(legend.position = "none")
+
+wb <- loadWorkbook("output/gdp2.xlsx")
+addWorksheet(wb, "Summary")
+writeDataTable(wb, sheet="Summary", temp, startCol = 3, startRow = 3,tableStyle = "TableStyleLight13")
+ print(p)
+ addWorksheet(wb, "Chart")
+wb %>% insertPlot(sheet="Chart",startCol =1, startRow=1,width=12,height = 9, dpi=600)
+saveWorkbook(wb, "output/gdp2_new.xlsx", overwrite = TRUE)
+```
+
+## Split the dataframe and write each group to a different worksheet
+
+Sometimes we may want to split a big dataframe into several worksheets using the groups of a specific column. This is helpful to organise the output and avoid the number of rows limit of 1.000.000.
+
+```{r}
+df_unit <- split(df,df$unit)
+write.xlsx(df_unit, file = "output/gdp2_unit.xlsx", overwrite = TRUE)
+```
+
+## Creating a custom function
+
+We can create a custom function, `write_countries`  with a single argument (`x` which is the country) that would create the same file. We just need to add a filter to the dataset with the variable that also  will be used for naming the files and worksheets. We do that using the base function `paste0`.
+
+```{r}
+write_countries <- function(x){
+  
+  temp<-df %>% 
+    filter(country == x)
+  
+  summ<- temp %>%
+  group_by(geo,unit,NUTS) %>% 
+  summarise(avg = round(mean(obs_value, na.rm = TRUE)))
+
+p<- ggplot()+
+  geom_col(data=summ %>% filter(NUTS!=1),aes(avg, reorder(geo,avg), fill= NUTS))+
+  geom_point(data=temp %>% filter(NUTS!=1), aes(obs_value,geo))+
+  facet_wrap(~unit, scales = "free_x")+
+  scale_x_continuous(scales::pretty_breaks(n=4), labels = scales::label_number())+
+  ggthemes::theme_fivethirtyeight()+
+  ggthemes::scale_fill_tableau()+
+  theme(legend.position = "none")
+
+  wb <- createWorkbook() 
+    modifyBaseFont(wb, fontSize = 12, fontName = "Calibri Light")
+    options(openxlsx.numFmt = "#,##0.00")
+    addWorksheet(wb, paste0("GDP_",x))
+    writeDataTable(wb, paste0("GDP_",x), temp, tableStyle = "TableStyleMedium13")
+    addWorksheet(wb, "Summary")
+    writeDataTable(wb, sheet="Summary", summ, startCol = 3, startRow = 3,tableStyle = "TableStyleLight13")
+     print(p)
+ addWorksheet(wb, "Chart")
+wb %>% insertPlot(sheet="Chart",startCol =1, startRow=1,width=12,height = 9, dpi=600)
+
+saveWorkbook(wb,paste0("output/",x,"_gdp2.xlsx"), overwrite = TRUE)}
+
+```
+
+
+```{r}
+
+write_countries("ES")
+```
+
+
+## Iterating the creation of files 
+
+Finally, we can automatise the creation of the files by creating a list of countries and applying the function to each element of the list. The use the function `walk` from the package `{purrr}` to do that.
+
+```{r}
+
+df<- rio::import("data/gdp2v.csv") %>% 
+  mutate(country = str_sub(geo,1,2), 
+       NUTS= as.factor(str_length(geo)-2)) %>% 
+  select(country,geo,NUTS,unit,obs_value) %>% 
+  filter(unit %in% c("EUR_HAB", "PPS_HAB_EU27_2020"))
+
+list_countries<- c("NL","SK","BE", "AT", "CZ")
+
+walk(list_countries, write_countries)
+```
+
+
+## A practical application: creating NQR files
+
+```{r, echo =FALSE}
+library(tidyverse)
+library(rio)
+library(openxlsx)
+library(janitor)
+library(ggtext)
+
+###select country
+country <- c("AT")
+
+#### For chart (change defaults if needed)
+nat_dot<- 4.5
+reg_dot<- 2.5
+line_chart<-1
+height_chart <-3
+width_chart<-6
+
+
+##### load dataset -----
+
+rev_df<- import(paste0("data/",country,".csv")) %>% 
+  arrange(na_item,geo,vintage) %>% 
+  mutate(across(starts_with("20"), as.numeric))
+
+
+###### Tidy ----
+rev_df_long <- rev_df %>%
+  pivot_longer(c(7:27),
+               names_to = "time",
+               values_to="values") %>%# to be changed when new year
+  filter(time >= 2013) %>%
+  filter(vintage >= 2015) %>%
+  mutate(
+    time = as.integer(time),
+    vintage = as.integer(vintage)
+  ) %>% 
+  select(-label)
+
+rev_df_wide<- rev_df_long %>% 
+  pivot_wider(names_from=time,
+              values_from=values) %>% 
+select(-Country)
+
+
+##### Shares ----
+shares_long<- rev_df_long %>% 
+  group_by(Country,na_item,time,vintage) %>% 
+  mutate(shares= values/values[NUTS =="0"]) %>% 
+  ungroup() %>% 
+  na.omit()
+
+shares_wide <- shares_long %>% 
+  select(-values) %>% 
+  mutate(shares=round(shares*100,2)) %>% 
+  pivot_wider(names_from=time,
+              values_from=shares) %>% 
+  arrange(na_item,geo,vintage) %>% 
+  filter(NUTS=="2") %>% 
+  select(-Country,-NUTS)
+
+
+#### Revisions ------
+rev_long <- shares_long %>%
+  group_by(Country,geo, na_item, time) %>%
+  arrange(vintage, .by_group = TRUE) %>%
+  mutate(rev = abs(shares/lag(shares)*100-100)) %>% 
+  ungroup()
+
+rev_wide <- rev_long %>% 
+  na.omit() %>% 
+  select(-values,-shares) %>%
+  mutate(rev=round(rev,2)) %>% 
+  pivot_wider(names_from=time,
+              values_from=rev) %>% 
+  arrange(na_item,geo,vintage)%>% 
+  filter(NUTS=="2")%>% 
+  select(-Country,-NUTS)
+
+
+####Mean revision----
+mean_rev_long<- rev_long %>% 
+  group_by(Country,geo, na_item,time) %>%
+  arrange(vintage, .by_group = TRUE) %>%
+  mutate( mean_rev= mean(rev,na.rm=TRUE)) %>% 
+  ungroup()
+
+mean_rev_wide <- mean_rev_long %>% 
+  select(-values,-shares,-rev,-vintage) %>% 
+  na.omit() %>% 
+  unique() %>% 
+  mutate(mean_rev=round(mean_rev,2)) %>% 
+  pivot_wider(names_from=time,
+              values_from=mean_rev) %>% 
+  arrange(na_item,geo)%>% 
+  filter(NUTS=="2")%>% 
+  select(-Country,-NUTS)
+
+
+#### Mean_weights------
+mean_weights_long <- shares_long %>%
+  group_by(Country,geo,na_item,time) %>% 
+  mutate(mean_weights = mean(shares, na.rm = TRUE)) %>% 
+  unique() %>% 
+  ungroup()
+
+mean_weights_wide <- mean_weights_long %>% 
+  select(-values,-shares,-vintage) %>%
+  na.omit() %>% 
+  unique() %>% 
+  mutate(mean_weights=round(mean_weights*100,2)) %>% 
+  pivot_wider(names_from=time,
+              values_from=mean_weights)%>% 
+  filter(NUTS=="2")%>% 
+  select(-Country,-NUTS)
+
+
+#### Weighted revision------
+
+weighted_rev_long <- full_join(mean_rev_long,mean_weights_long) %>%
+  arrange(geo,na_item,vintage,time) %>% 
+  select(-values,-shares,-rev,-vintage) %>%
+  unique() %>% 
+  group_by(Country,geo,na_item,time) %>% 
+  mutate(weighted_rev = mean_rev*mean_weights) %>% 
+  select(Country, NUTS, geo,na_item, time,weighted_rev) %>%
+  ungroup() %>% 
+  filter(time!=2020 & weighted_rev !="NaN") ######################CAREFUL-----
+
+weighted_rev_wide <- weighted_rev_long %>% 
+  mutate(weighted_rev=round(weighted_rev,2)) %>% 
+pivot_wider(names_from=time,
+            values_from=weighted_rev) %>% 
+  arrange(na_item,geo)%>% 
+  filter(NUTS=="2")%>% 
+  select(-Country,-NUTS)
+
+
+final<- weighted_rev_long %>%
+  filter(NUTS =="2") %>% 
+  group_by(Country,na_item,time) %>% 
+  summarise(indic=sum(weighted_rev,na.rm=TRUE))
+
+final_b1g_emp<- final %>% 
+  filter(na_item %in% c("B1G","EMP") &
+         time %in% c("2015","2016","2017","2018","2019")) 
+
+final_d1_b6n<- final %>% 
+  filter(na_item %in% c("D1","B6N") & 
+           time %in% c("2014","2015","2016","2017","2018")) 
+
+final_long<- bind_rows(final_b1g_emp, final_d1_b6n) %>% 
+  arrange(time)
+
+final_wide<- final_long %>% 
+  mutate(indic=round_half_up(indic,2)) %>% 
+  pivot_wider(names_from = time,
+              values_from= indic)
+x<-final_wide$na_item  
+final_wide$na_item<- factor(x, levels=c("B1G","EMP","D1","B6N"))
+
+final_wide<- final_wide %>% 
+  arrange(na_item)
+
+
+#### Last minus first -----
+
+first_last<- function(df,na_items,times,vintages){
+  df %>%
+    pivot_longer(c(7:27),
+                 names_to = "time",
+                 values_to="obs_value") %>%# to be changed when new year
+    filter(na_item %in% na_items & time == times) %>%
+    filter(vintage %in% vintages) %>%# to be changed when new year
+    select(-label) %>% 
+      na.omit() %>% 
+    mutate(
+      time = as.integer(time),
+      vintage = as.integer(vintage)
+    ) %>% 
+    group_by(Country,na_item,time,vintage) %>% 
+    mutate(shares= obs_value/obs_value[NUTS =="0"]) %>% 
+    ungroup() %>% 
+    group_by(Country,geo, na_item, time) %>%
+    arrange(vintage, .by_group = TRUE) %>%
+    mutate(rev = abs(shares/shares[vintage== min(vintages)]*100-100)) %>% 
+    ungroup() %>% 
+    group_by(Country,geo,na_item,time) %>% 
+    mutate(meanshares = mean(shares),
+           wrev = rev*meanshares) %>% 
+    select(Country, NUTS, geo,na_item, time, rev,meanshares,wrev) %>%
+    na.omit() %>% 
+    group_by(Country,NUTS,na_item,time) %>% 
+    filter(NUTS=="2") %>% 
+    summarise(regwrev=sum(wrev,na.rm=TRUE)) %>% 
+    ungroup() %>% 
+    select(-NUTS) %>% 
+    distinct()
+}
+
+# can be made longer for other countries
+b1g_emp_2015<- first_last(rev_df,c("B1G","EMP"),2015,c("2016","2021"))
+b1g_emp_2016<- first_last(rev_df,c("B1G","EMP"),2016,c("2017","2021"))
+b1g_emp_2017<- first_last(rev_df,c("B1G","EMP"),2017,c("2018","2021"))
+b1g_emp_2018<- first_last(rev_df,c("B1G","EMP"),2018,c("2019","2021"))
+b1g_emp_2019<- first_last(rev_df,c("B1G","EMP"),2019,c("2020","2021"))
+
+d1_b6n_2014<- first_last(rev_df,c("D1","B6N"),2014,c("2016","2021"))
+d1_b6n_2015<- first_last(rev_df,c("D1","B6N"),2015,c("2017","2021"))
+d1_b6n_2016<- first_last(rev_df,c("D1","B6N"),2016,c("2018","2021"))
+d1_b6n_2017<- first_last(rev_df,c("D1","B6N"),2017,c("2019","2021"))
+d1_b6n_2018<- first_last(rev_df,c("D1","B6N"),2018,c("2020","2021"))
+
+first_last<- bind_rows(b1g_emp_2015, b1g_emp_2016,b1g_emp_2017,
+                       b1g_emp_2018,b1g_emp_2019, d1_b6n_2014,d1_b6n_2015,
+                       d1_b6n_2016,d1_b6n_2017,d1_b6n_2018) %>% 
+  arrange(time) %>%
+  mutate(regwrev=round_half_up(regwrev,2)) %>% 
+  pivot_wider(names_from=time,
+              values_from=regwrev) 
+
+x<-first_last$na_item  
+first_last$na_item<- factor(x, levels=c("B1G","EMP","D1","B6N"))
+
+first_last<- first_last %>% 
+  arrange(na_item) 
+
+       
+###chart 2
+temp<- weighted_rev_long %>% 
+  filter(NUTS=="2") %>% 
+  group_by(geo,na_item) %>% 
+  mutate(mean=mean(weighted_rev,na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  select(geo,na_item,mean) %>% 
+  distinct() %>% 
+  group_by(na_item) %>% 
+  mutate(contr=sum(mean,na.rm=TRUE)) %>%
+  ungroup() %>% 
+  group_by(na_item) %>%
+  mutate(share_rev=mean*100/contr) %>% 
+  select(geo,na_item,share_rev) 
+ 
+  
+temp1<- mean_weights_long %>% 
+  filter(NUTS=="2") %>% 
+  group_by(geo,na_item) %>% 
+  mutate(mean=100*mean(mean_weights,na.rm=TRUE)) %>% 
+  select(geo,na_item,mean) %>% 
+  distinct()
+
+temp<- full_join(temp,temp1) %>% 
+  mutate(diff=mean-share_rev)
+
+mycaption <- '<span style="color:#14509E;">Share in variable</span> / 
+                <span style="color:#F51A0E;">Share in revision indicator</span> /
+                <span style="color:#59D122;">Share in revision indicator</span>'
+
+
+reg_plot<-ggplot()+
+  geom_point(data=temp,aes(mean,reorder(geo,mean)),size=nat_dot,colour="#14509E")+
+  geom_point(data=temp %>% filter(diff>0),aes(share_rev,reorder(geo,mean)),size=reg_dot,colour="#59D122")+
+  geom_point(data=temp %>% filter(diff<0),aes(share_rev,reorder(geo,mean)),size=reg_dot,colour="#F51A0E")+
+  geom_segment(data=temp%>% filter(diff>0),aes(x=mean,xend=share_rev,y=geo,yend=geo),size=line_chart,colour="#59D122")+
+  geom_segment(data=temp%>% filter(diff<0),aes(x=mean,xend=share_rev,y=geo,yend=geo),size=line_chart,colour="#F51A0E")+
+  facet_grid(~na_item)+
+  #coord_cartesian(expand=TRUE, clip = "off" )+
+  theme(plot.background = element_rect(fill= "#FFFFFF", #panel background
+                                 colour = "black"),# border lines
+  line = element_line(colour = "black"), 
+  rect = element_rect(fill = "#FAFAFA", 
+                    linetype = 0, 
+                    colour = NA),
+panel.background = element_rect(fill= "#FAFAFA"),#background inside axis
+axis.title = element_blank(), #axis titles
+axis.line.x = element_line(size = rel(1.1),colour = "#14509E" ),#line of axis
+axis.line.y = element_line(size = rel(1.1), colour = "#14509E"),
+axis.text.y = element_text(colour = "#14509E", size = rel(1.1)),
+axis.text.x = element_text(colour = "#14509E", size = rel(1.1)),
+axis.ticks = element_line(size =rel(1.1),colour = "black"),
+panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(),
+legend.position = "bottom",
+legend.key = element_rect(fill="white"),
+legend.background = element_rect(fill="white", colour = "#14509E", linetype = "solid"),#background colour legend
+plot.title = element_text(face= "bold", colour ="#14509E", hjust =0,size = rel(1.3), margin = margin(10,0,10,0)),
+strip.background = element_rect(fill = "#14509E", colour = NA),
+strip.text.x = element_text(face = "bold",  size = rel (1.2), colour = "white" ), #margin = margin() 
+strip.text.y = element_text(face = "bold", size = rel (1.2),  colour = "white"),
+strip.placement = "outside",
+panel.spacing = unit(2, "lines"))+
+  labs(title= paste0(unique(str_sub(temp$geo,1,2)),": Regional breakdown of the indicator, average for the last 5 years"),
+       subtitle = mycaption) +
+  theme(plot.subtitle = element_markdown(hjust = 0, size = rel(1.3)))
+```
+
+First, we load an excel file that contains an empty template and set the format to two decimals with a thousand separator
+
+```{r}
+wb <- loadWorkbook("data/template.xlsx")
+options(openxlsx.numFmt = "#,##0.00")
+```
+
+In a specific row and column of the worksheet *0_Results*, with a specific table style we write the results of the indicator. 
+```{r}
+final_wide
+
+writeDataTable(wb, sheet="0_Results", final_wide, startCol = 1, startRow = 3,tableStyle = "TableStyleLight13")
+```
+
+
+```{r}
+first_last
+
+writeDataTable(wb, sheet="0_Results", first_last, startCol = 1, startRow = 10,tableStyle = "TableStyleLight13")
+```
+
+Then we create a plot showing some analysis of the indicator.
+
+```{r}
+print(reg_plot)
+```
+
+And add it to the sheet *1_Reg_plot*. 
+
+```{r}
+wb %>% insertPlot(sheet="1_Reg_plot",startCol =1, startRow=1,width=width_chart,height = height_chart, dpi=600)
+```
+
+We write in different sheets all the source data and all the intermediate steps to arrive to the indicator.
+
+```{r}
+writeDataTable(wb, sheet="2_Source", rev_df_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+writeDataTable(wb, sheet="3_Shares", shares_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+writeDataTable(wb, sheet="4_Abs_rev", rev_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+writeDataTable(wb, sheet="5_Mean_rev", mean_rev_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+writeDataTable(wb, sheet="6_Mean_shares", mean_weights_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+writeDataTable(wb, sheet="7_Weighted_rev",weighted_rev_wide, startCol = 1, startRow = 1,tableStyle = "TableStyleLight13")
+
+saveWorkbook(wb, paste0("data/",country,"_NQR_revision.xlsx"), overwrite = TRUE)
+
+```
+

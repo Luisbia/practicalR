@@ -1,0 +1,120 @@
+---
+title: "Crosstalk"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = FALSE,
+                      message= FALSE,
+                      warning= FALSE)
+```
+
+## Introduction
+
+`{crosstalk}` allow that tables and charts share a dataframe and connect them. It works with `{plotly}`, `{DT}`, `{leaflet}`, `{scatterD3}` and a few other less known libraries.
+
+## Data and libraries
+
+```{r}
+library(tidyverse)
+library(crosstalk)
+library(DT)
+library(dataregacc)
+library(plotly)
+```
+
+```{r}
+df<- regacc %>%
+  filter(table %in% c("2hh","2gdp","3pop","3emp") &
+         na_item %in% c("B1GQ","B6N","EMP","POP") &
+          unit %in% c("EUR_HAB", "PS") &
+           NUTS=="2" &
+           nace_r2 %in% c("TOTAL","Z") &
+           time=="2019") %>% 
+  select(country,geo,na_item,values) %>% 
+  unique() %>% 
+    pivot_wider(names_from=na_item,
+              values_from=values) %>% 
+  na.omit()
+
+```
+
+## Creating a shared object
+
+We create a shared dataset, which it is not a dataframe but a function.
+
+```{r}
+shared_df <- SharedData$new(df,key= ~geo)
+```
+
+## Linking two charts
+
+We can create two interconnected scatter charts. bscols just puts the two elements horizontally.
+
+```{r}
+bscols(
+  plot_ly(shared_df, x= ~B1GQ, y =~B6N, text = ~geo),
+  plot_ly(shared_df, x=~EMP, y=~POP, text = ~geo)
+)
+```
+
+We can add filters and slide bars
+
+```{r}
+df1<- df %>% 
+  mutate(country=str_sub(geo,1,2))
+
+shared_df1 <- SharedData$new(df1,key= ~geo)
+
+bscols(widths = c(3,NA,NA),
+  list(
+    filter_checkbox("country", "Country", shared_df1, ~country, inline = TRUE),
+    filter_slider("B1GQ", "GDP", shared_df1, ~B1GQ, width = "100%")),
+  plot_ly(shared_df1, x= ~B1GQ, y =~B6N, text = ~geo,marker=list(size=10,color="red")),
+  plot_ly(shared_df1, x=~EMP, y=~POP, text = ~geo, marker=list(size=10,color="blue"))
+)
+```
+
+## Linking a table and a chart
+
+Or a connected table and chart.
+
+```{r}
+
+  plot_ly(shared_df1, x= ~B1GQ, y =~B6N, text = ~geo,marker=list(size=10,color="red"))
+  datatable(shared_df1, filter = "top") 
+
+```
+
+## Linking two tables
+
+or two tables
+
+```{r}
+
+gdp_hh <- df %>%
+  select(-POP,-EMP) %>% 
+  mutate(country=str_sub(geo,1,2))
+
+emp_pop <- df %>% 
+  select(-B1GQ, -B6N) %>% 
+  mutate(country=str_sub(geo,1,2))
+
+shared_gdp <- SharedData$new(gdp_hh,key= ~country,group="shared_obj")
+shared_emp <- SharedData$new(emp_pop,key= ~country,group="shared_obj")
+
+  filter_select(
+  id = "id-selector", label = "Country:", 
+  sharedData = shared_gdp, group = ~country)
+  
+  datatable(shared_gdp, filter = "top") 
+  datatable(shared_emp, filter = "top") 
+
+```
+

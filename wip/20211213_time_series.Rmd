@@ -1,0 +1,207 @@
+---
+title: "Time Series"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    default_style: "light"
+    downcute_theme: "default"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(tsbox)
+library(ggfortify)
+library(lubridate)
+library(forecast)
+library(tsibble)
+library(feasts)
+```
+
+## Time series objects
+
+Base R has a time-series object class `ts`. We can pass a vector specify the starting date and the periodicity and we get a `ts` object.
+
+```{r}
+qb <- eurostat::get_eurostat("namq_10_gdp", filter = list(
+  geo = "EU27_2020",
+  na_item = "B1GQ",
+  s_adj = "SCA",
+  unit = "CLV15_MEUR"
+)) %>%
+  na.omit() %>%
+  select(values) %>% 
+  ts(frequency = 4, start = c(1995, 1))
+
+head(qb)
+```
+
+This brings a lot of advantages. We can directly plot the object
+
+```{r}
+plot(qb)
+```
+
+Or convert it
+
+```{r}
+logqb <-log (qb)
+plot(logqb)
+```
+
+Decompose it.
+
+```{r}
+comp<- decompose(qb, type = c("multiplicative"))
+plot(comp)
+```
+
+We can see already the seasonal component of the series.
+
+```{r}
+seas_qb <- qb- comp$seasonal
+plot(seas_qb)
+```
+
+We can fit an arima model.
+
+```{r}
+arima(qb)
+```
+
+and more sophisticated things, for example using the package **{forecast}**, we can get a forecast with confidence intervals. 
+
+```{r}
+f_qb <-forecast::forecast(qb)
+
+plot(f_qb)
+```
+
+We see that the forecast produces an object that is a list.
+
+```{r}
+str(f_qb)
+```
+
+We can access its elements inside the list, for example, the mean forecast and the upper and lower values.
+
+```{r}
+f_qb$mean
+f_qb$lower
+f_qb$upper
+```
+
+Most R packages for time series work with `ts` objects. The cost is that for working with several time series we will need to work with lists. Also it is more difficult to filter, subset, etc. For example to filter values after 2019Q1.
+
+```{r}
+window(qb, start=c(2019,1))
+```
+
+There are some relatively new libraries **{tsbox}** for conversion and other operations and **{tsibble}** and **{feasts}** allowing tidyverse verbs that make manipulating multiple time series much easier.
+
+## Tsbox
+
+With **{tsbox}** we can easily convert back and forth between several object classes (ts, dataframes, data tables, tsibble...).
+
+```{r}
+qb_ts <-qb
+qb_df <- ts_df(qb_ts)
+
+qb_dt <-ts_dt(qb_ts)
+
+qb_tsibble <- ts_tsibble(qb_ts)
+
+```
+
+That allows us to calculate the functions of tsbox on any class of object.
+
+Normalise series to zero
+
+```{r}
+ts_plot(ts_scale(qb_ts, center = TRUE))
+```
+
+plot the trend
+
+```{r}
+ts_dygraphs(ts_trend(qb_df))
+```
+
+Several growth rates
+
+```{r}
+ts_plot(ts_pc(qb_dt)) # calculate quarterly growth rates
+ts_plot(ts_pcy(qb_dt)) # calculate year on year growth rates
+ts_plot(ts_pca(qb_dt)) # calculate annualised growth rates
+ts_frequency(qb_tsibble, to ="year", aggregate="mean")# coonvert to annual average
+```
+
+
+## Feasts
+
+We load a dataframe with several variables and convert it to a tsibble. It is important to let tsibble now that the periodicity is quarter otherwise he might understand there are gaps in the data. 
+
+```{r}
+df_full <- eurostat::get_eurostat("namq_10_gdp", time_format = "date", filter = list(
+  geo = "EU27_2020",
+  na_item = "B1GQ",
+  s_adj = "NSA",
+  unit = c("CLV15_MEUR", "CP_MEUR")
+)) %>% 
+  select(time,geo, na_item, unit,values) %>% 
+  mutate(time = lubridate::ymd(time)) %>% 
+  na.omit()
+
+df_full<- ts_tsibble(df_full) %>% 
+mutate(time=yearquarter(time))# do not forget this
+```
+
+We can create easily a so-called seasonal graph.
+
+```{r}
+df_full %>% 
+  filter(unit=="CLV15_MEUR" ) %>% 
+  gg_season()
+```
+
+Compare the seasonality of a transaction in different prices.
+
+```{r}
+df_full %>% 
+  group_by(unit) %>% 
+  gg_subseries()
+```
+
+or check in a nice graph the classical decomposition.
+
+```{r}
+comp<- df_full %>% 
+filter(unit =="CLV15_MEUR") %>% 
+  select(time, values) %>% 
+  model(stl=classical_decomposition(values))
+
+components(comp) %>% 
+  autoplot()
+
+```
+
+or a SEATS decomposition. but we will need the {seasonal} package which cannot be installed  in the Commission laptops.
+
+```{r}
+comp<- df_full %>% 
+filter(unit =="CLV15_MEUR") %>% 
+  select(time, values) %>% 
+  model(seats = X_13ARIMA_SEATS(values ~ seats()))
+
+components(comp) %>% 
+  autoplot()
+```
+
+
+Add RJdemetra
+ 
