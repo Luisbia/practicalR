@@ -1,0 +1,240 @@
+---
+title: "Things that make your life easier in R"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = FALSE,
+                      message= FALSE,
+                      warning= FALSE)
+```
+
+I’ll show some useful packages that may be useful, specially when starting. But before something more advanced available in Rstudio.
+
+## Code snippets
+
+Go to Tools + Global Options + Code + Snippets. We will create a function that extracts to a temporary excel file a data frame.
+
+```{r,eval=FALSE}
+show_in_excel
+    show_in_excel <- function(.data){
+    tmp <- paste0(tempfile(), ".xlsx")
+    openxlsx::write.xlsx(.data,tmp)
+    browseURL(tmp)
+    }
+    
+show_in_excel(mtcars)
+```
+
+We can write a code snippet to call this function every time we need it.
+
+```{r,eval=FALSE}
+snippet lb_show_in_excel
+    show_in_excel <- function(.data){
+    tmp <- paste0(tempfile(), ".xlsx")
+    openxlsx::write.xlsx(.data,tmp)
+    browseURL(tmp)
+    }
+    show_in_excel (${1:n})
+```
+
+## knitr::purl
+
+Allows to extract a script `(r)` from an rmarkdown `(rmd)` file
+
+```{r,eval=FALSE}
+knitr::purl("20211212.rmd")
+```
+
+## Datapasta
+
+To easily bring data from internet, excel files, etc. Before copying go to Addins as choose datapasta + paste as tribble
+
+```{r,eval=FALSE}
+library(datapasta)
+
+copy<- tibble::tribble(
+  ~mpg, ~cyl, ~disp,  ~hp, ~drat,   ~wt, ~qsec, ~vs, ~am, ~gear, ~carb,
+    21,   6L,   160, 110L,   3.9,  2.62, 16.46,  0L,  1L,    4L,    4L,
+    21,   6L,   160, 110L,   3.9, 2.875, 17.02,  0L,  1L,    4L,    4L,
+  22.8,   4L,   108,  93L,  3.85,  2.32, 18.61,  1L,  1L,    4L,    1L,
+  21.4,   6L,   258, 110L,  3.08, 3.215, 19.44,  1L,  0L,    3L,    1L,
+  18.7,   8L,   360, 175L,  3.15,  3.44, 17.02,  0L,  0L,    3L,    2L,
+  18.1,   6L,   225, 105L,  2.76,  3.46, 20.22,  1L,  0L,    3L,    1L
+  )
+```
+
+## Eurostat
+
+```{r}
+library(eurostat)
+library(tidyverse)
+
+
+dd <- get_eurostat("namq_10_gdp", 
+                     filters = list(geo = c("EA19","EU27_2020"), 
+                                    na_item = "B1GQ", 
+                                    unit = "CLV_PCH_PRE",
+                                    s_adj = "SCA")) %>% 
+  filter(time >= "2008-01-01")
+```
+
+Particularly useful is to download the labels of the codes.
+
+```{r, eval = TRUE}
+get_label_codes <- function() {
+  labels <- tibble(
+    dictionary = c("na_item", "nace_r2", "geo", "asset10", "coicop"),
+    data = list(
+      eurostat::get_eurostat_dic("na_item"),
+      eurostat::get_eurostat_dic("nace_r2"),
+      eurostat::get_eurostat_dic("geo"),
+      eurostat::get_eurostat_dic("asset10"),
+      eurostat::get_eurostat_dic("coicop")
+    )
+  ) %>%
+    unnest(cols = c(data))
+
+  return(labels)
+}
+
+labels <- get_label_codes()
+
+head(labels)
+```
+## Esquise
+
+To create a basic ggplot with a GUI. 
+
+```{r, eval=FALSE}
+library(esquisse)
+
+esquisse::esquisser(dd)
+```
+
+```{r,eval=FALSE}
+ddd<-dd %>%
+ filter(time >= "2018-10-15" & time <= "2021-07-01") %>%
+ ggplot() +
+  aes(x = time, fill = geo, weight = values) +
+  geom_bar(position = "dodge") +
+  scale_fill_viridis_d(option = "plasma", direction = 1) +
+  theme(legend.position = "bottom")
+```
+
+## ggThemeAssist
+
+To improve ggplot theme elements with a GUI.
+
+```{r,eval=FALSE}
+library(ggThemeAssist)
+
+ggThemeAssist::ggThemeAssistGadget(ddd)
+```
+
+## Styler
+
+To give a more professional and consistent look to the code style. It is added as an Rstudio Addin.
+
+```{r,eval=FALSE}
+library(styler)
+```
+
+## Boomer
+
+To view what a long chain of functions do to the data.
+
+```{r}
+library(boomer)
+
+dd<- dd %>% 
+  pivot_wider(names_from = geo,
+        values_from = values) %>% 
+  mutate(diff= EA19-EU27_2020) %>% 
+  pivot_longer(cols = c(where(is.numeric)),
+        names_to = "geo",
+        values_to = "values")
+```
+
+```{r}
+boom(dd<- dd %>% 
+  pivot_wider(names_from = geo,
+        values_from = values) %>% 
+  mutate(diff= EA19-EU27_2020) %>% 
+  pivot_longer(cols = c(where(is.numeric)),
+        names_to = "geo",
+        values_to = "values"))
+```
+
+## Tidylog
+
+Similar but less verbose.
+
+```{r message=TRUE}
+library(tidylog, warn.conflicts = FALSE)
+
+  dd <- dd%>% 
+  filter(geo !="diff") %>% 
+  filter(time >="2020-10-01") %>% 
+  group_by(geo) %>% 
+   pivot_wider(names_from = geo,
+        values_from = values)
+```
+
+## Janitor
+
+```{r}
+library(janitor)
+```
+
+### Remove columns with a constant value
+
+```{r}
+dd
+```
+
+```{r}
+dd<- janitor::remove_constant(dd)
+dd
+```
+
+### Remove duplicates
+
+```{r}
+temp<- slice(dd,3)
+
+dd <- bind_rows(dd,temp)
+
+janitor::get_dupes(dd)
+```
+
+### Fix column names
+
+```{r}
+dd <- janitor::clean_names(dd)
+dd
+```
+
+### Round like in Excel
+
+```{r}
+dd<- dd %>% 
+  select(time,ea19) %>% 
+  mutate(ea19=ea19 +0.05)
+
+dd
+```
+
+```{r}
+dd<- dd %>% 
+  mutate(normal_round=round(ea19,1),
+         excel_round=janitor::round_half_up(ea19,1))
+dd
+```
+

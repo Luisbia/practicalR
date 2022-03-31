@@ -1,0 +1,95 @@
+---
+title: "Inspect excel files with tidyxl"
+author: "Luis Biedma"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message = FALSE)
+```
+
+## Introduction
+
+Sometimes we are asked to look and review some calculations done in excel or we want to investigate possible (human) errors. The library `{tidyxl}` is very helpful for that task.
+
+## Data and libraries
+
+We are going to look at the central file of the employment estimates. We can load all the cells with the function `xlsx_cells()`. First we create a vector with the names of the sheets, we read them and filter the ones that are numeric. 
+
+```{r}
+library(tidyverse)
+library(tidyxl)
+library(here)
+
+countries <- c(
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK",
+  "EE", "ES", "FR", "FI", "GR", "HR", "HU",
+  "IE", "IT", "LH", "LU", "LV", "MT", "NL",
+  "PL", "PT", "RO", "SE", "SI", "SK"
+)
+```
+
+## Reading the data
+
+```{r}
+df<- tidyxl::xlsx_cells(here("data","central_pers.xlsm")) %>%
+  filter(sheet %in% countries &
+           !is.na(numeric))
+
+glimpse(df)
+```
+Let's look at a row to see what information we have.
+```{r}
+(temp <- df %>% 
+  filter(sheet=="BE" & !is.na(formula_ref)) %>% 
+  janitor::remove_constant() %>% 
+  slice_head(n=10))
+```
+
+## Checking formulas
+
+We could, for example, check if for DW6 we are using the same formula in all countries.
+
+```{r}
+(temp<- df %>% 
+   filter(address=="DW6") %>% 
+   select(formula) %>% 
+   distinct())
+```
+
+But that formula is not very interesting as it only calculates a growth rate. We need to have some knowledge about the file to investigate. We know that rows 117-127 and columns 6-32 contains the annual data of the countries used to calculate the EU aggregates.
+
+```{r}
+temp<- df %>% 
+   select(sheet, row, col, formula) %>% 
+  filter(row >= 117 & row <=127) %>% 
+  filter(col>=6 & col <= 32)
+
+head(temp)
+```
+
+Now that we have filtered the data  we can check if all the data is sourced the same way. We use `across()` together with `n_distinct()`.
+
+```{r}
+distinct<- temp %>% 
+  group_by(row,col) %>% 
+  summarise(across(c(formula),n_distinct)) %>%
+  filter(formula!=1) %>% 
+  arrange(desc(formula))
+
+head(distinct)
+```
+
+It seems that different formulas are used. Let's look in more detail at row 117 and col 24.
+
+```{r}
+temp %>% 
+  filter(row=="117" & col=="24" & 
+         formula!="VLOOKUP($A117,an!$A$7:$X$1338,COUNTA($B$115:X$115)+1,FALSE)") %>% 
+  arrange(formula)
+```
+SK is linking to a different file and for FR and CY the range is different.
