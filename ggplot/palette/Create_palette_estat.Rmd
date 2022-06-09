@@ -1,0 +1,220 @@
+# Custom palette {#palette}
+
+We can create a personal palette for our charts. While there are many utilities to create palettes, in order to apply consistent colouring schemes in different charts, it is useful to create a personal one. We will create one for our purposes, one with Eurostat’s theme colours and some others that can be easily updated.
+
+We will follow the steps explained in this tutorial <https://drsimonj.svbtle.com/creating-corporate-colour-palettes-for-ggplot2> and using the Eurostat stly guide <https://ec.europa.eu/eurostat/documents/4187653/7192088/STYLE_GUIDE_2016.pdf/dbdf7b92-5ac5-4313-ae80-296f52692e5c?t=1457450262000>. We will need to follow these steps:
+
+1.Named vector of hex codes for the colors (`luis_colours`).
+1.Function to access hex codes (in 1) (`luis_cols`).
+1.Named list of color palettes (`luis_palettes`).
+1.Function to access palettes and interpolate(`luis_pal`).
+1.ggplot2-compatible scale functions that use the palettes (`scale_colour_luis`, `scale_fill_luis`)
+
+## luis_colours
+
+First, we create a vector of colours and names for the colours. I include Eurostat’s theme colours. According to the style guide <https://ec.europa.eu/eurostat/documents/4187653/7192088/STYLE_GUIDE_2016.pdf/dbdf7b92-5ac5-4313-ae80-296f52692e5c?t=1457450262000>  these are the theme colours.
+
+
+```{r}
+library(tidyverse)
+eurostat_colours <- c('theme1' = "#466EB4",
+                 'theme2' = "#AF4B91",
+                 'theme3' = "#E6A532",
+                 'theme4' = "#00A0E1",
+                 'theme5' = "#7DAF4B",
+                 'theme6' = "#B93C46",
+                 'theme7' = "#961E2D",
+                 'theme8' = "#41AFAA",
+                 'theme9' = "#D7642D")
+
+scales::show_col(eurostat_colours)
+```
+
+I am going to change the order (which does not have any effect here but it is the order I have chosen)and add other colours.
+
+```{r}
+library(tidyverse)
+luis_colours <- c('theme2' = "#AF4B91",
+                   'theme3' = "#E6A532",
+                   'theme1' = "#466EB4",
+                   'theme7' = "#961E2D",
+                   'theme8' = "#41AFAA",
+                   'theme5' = "#7DAF4B",
+                   'theme6' = "#B93C46",
+                   'theme9' = "#D7642D",
+                   'theme4' = "#00A0E1",
+                   'fucsia' = "#CC2299", 
+                   'yellow' = "#EECC55",
+                   'brown' = "#EECC99",
+                   'blue' = "#0000FF",
+                   'blue1' = "#11448B",
+                   'red' = "#EE0000",
+                   'red1' = "#881111",
+                   'orange' = "#FF7700",
+                   'grey' = "#CCCCCC",
+                   'green' = "#668822")
+
+scales::show_col(luis_colours)
+
+```
+
+## luis_cols 
+
+We create a function to extract the HEX colour codes from the name.
+
+```{r}
+#' Function to extract  colors as hex codes
+#'
+#' @param ... Character names of colors
+#'
+luis_cols <- function(...) {
+  cols <- c(...)
+
+  if (is.null(cols)) {
+    return(luis_colours)
+  }
+
+  luis_colours[cols]
+}
+
+luis_cols("theme2")
+
+```
+
+We can already use it setting manually the colour.
+
+```{r}
+df<- data.table::fread("data/gdp2v.csv") %>% 
+  filter(unit=="PPS_HAB_EU27_2020") %>% 
+  mutate(country=str_sub(geo,1,2),
+         NUTS=str_length(geo)-2) %>% 
+  filter(NUTS=="2" & country =="BE") %>% 
+  select(-obs_decimals,-obs_status, -unit,-NUTS) 
+
+ggplot(df, aes(time,obs_value, group = geo))+
+  geom_line(size=1, colour = luis_cols("theme2"))+
+  theme_minimal()
+```
+
+## luis_palettes
+
+Now we create a list of combination of the colours defined. We will create the three palettes described in the Eurostat style guide
+
+```{r}
+luis_palettes <- list('palette1' = luis_cols("theme8", 
+                                             "theme4", 
+                                             "theme1", 
+                                             "theme3", 
+                                             "theme9"),
+                      'palette2' = luis_cols("theme5",
+                                             "theme7",
+                                             "theme1",
+                                             "theme3",
+                                             "theme9"),
+                      'palette3' = luis_cols("theme8",
+                                             "theme7",
+                                             "theme1",
+                                             "theme2",
+                                             "theme6")
+)
+```
+
+## luis_pal
+
+
+We create a function to interpolate the colours automatically when we need more than the ones available in the palette.
+
+```{r}
+#' Return function to interpolate a  color palette
+#'
+#' @param palette Character name of palette in luis_palettes
+#' @param reverse Boolean indicating whether the palette should be reversed
+#' @param ... Additional arguments to pass to colorRampPalette()
+#'
+luis_pal<- function (palette= "palette1",
+                     reverse = FALSE, ...) {
+  pal <- luis_palettes[[palette]]
+  if (reverse) pal <- rev (pal)
+  colorRampPalette(pal,...)
+}
+
+```
+
+This function gets a palete by name from the list ("palette1" by default), has a boolean condition determining whether to reverse the order or not, and additional arguments to pass on to colorRampPallete() (such as an alpha value).
+
+```{r}
+luis_pal("palette1")
+```
+
+This returned function will interpolate the palette colors for a certain number of levels, making it possible to create shades between our original colors. To demonstrate, we can interpolate the "palette1" palette (which only includes five colours to a length of 8:
+
+```{r}
+scales::show_col(luis_pal("palette3",reverse=TRUE)(8))
+```
+
+## scale_colour_luis & scale_fill_luis
+
+Finally, we create a function to be used in ggplot scales.
+
+```{r}
+#' Color scale constructor for luis colors
+#'
+#' @param palette Character name of palette in luis_palettes
+#' @param discrete Boolean indicating whether color aesthetic is discrete or not
+#' @param reverse Boolean indicating whether the palette should be reversed
+#' @param ... Additional arguments passed to discrete_scale() or
+#'            scale_color_gradientn(), used respectively when discrete is TRUE or FALSE
+#'
+scale_colour_luis <- function(palette = "palette1", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- luis_pal(palette = palette, reverse = reverse)
+
+  if (discrete) {
+    discrete_scale("colour", paste0("luis_", palette), palette = pal, ...)
+  } else {
+    scale_color_gradientn(colours = pal(256), ...)
+  }
+}
+
+#' Fill scale constructor for luis colors
+#'
+#' @param palette Character name of palette in luis_palettes
+#' @param discrete Boolean indicating whether color aesthetic is discrete or not
+#' @param reverse Boolean indicating whether the palette should be reversed
+#' @param ... Additional arguments passed to discrete_scale() or
+#'            scale_fill_gradientn(), used respectively when discrete is TRUE or FALSE
+#'
+scale_fill_luis <- function(palette = "palette1", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- luis_pal(palette = palette, reverse = reverse)
+
+  if (discrete) {
+    discrete_scale("fill", paste0("luis_", palette), palette = pal, ...)
+  } else {
+    scale_fill_gradientn(colours = pal(256), ...)
+  }
+}
+```
+
+Each of these functions specifies a palette, whether the palette is being applied based on a discrete or numeric variable, whether to reverse the palette colors, and additional arguments to pass to the relevant ggplot2 function (which differs for discrete or numeric mapping).
+
+
+```{r}
+ggplot(df, aes(time,obs_value, colour = geo))+
+  geom_line(size=1)+
+  theme_minimal()+
+  scale_colour_luis()
+```
+
+```{r}
+ggplot(df, aes(time,obs_value, colour = geo))+
+  geom_line(size=1)+
+  theme_minimal()+
+  scale_colour_luis(palette = "palette2", reverse = TRUE)
+```
+
+```{r}
+ggplot(df %>% filter(time =="2019"), aes(geo,obs_value, fill = geo))+
+  geom_col()+
+  theme_minimal()+
+  scale_fill_luis(palette="palette3")
+```
+
